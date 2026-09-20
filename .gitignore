@@ -1,0 +1,46 @@
+# ── Secrets — never commit these ─────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# ── Dependencies ─────────────────────────────────────────────
+node_modules/
+
+# ── Runtime files ────────────────────────────────────────────
+# Uploaded vehicle photos and logs are data, not source (the folders are kept empty).
+uploads/*
+!uploads/.gitkeep
+logs/*
+!logs/.gitkeep
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pids/
+*.pid
+
+# ── Local scratch scripts (one of them contains database credentials) ──
+check_*.js
+get_unique.js
+test_match.js
+scratch*
+tmp/
+
+# ── Test output / coverage ───────────────────────────────────
+coverage/
+.nyc_output/
+
+# ── Build / tooling ──────────────────────────────────────────
+dist/
+build/
+*.tsbuildinfo
+.cache/
+
+# ── Editors / OS ─────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
