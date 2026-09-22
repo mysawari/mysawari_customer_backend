@@ -17,5 +17,6 @@ router.use('/customers', customerRoutes);
 router.use('/reviews', reviewRoutes);
 router.use('/vehicles', require('../modules/vehicles/vehicle.routes'));
 router.use('/payments', require('../modules/payments/payment.routes'));
+router.use('/leads', require('../modules/leads/lead.routes'));
 
 module.exports = router;

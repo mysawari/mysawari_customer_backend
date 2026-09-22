@@ -67,7 +67,7 @@ class AuthService {
     }
   }
 
-  async verifyOtp({ mobileNumber, otp, customerName, referredByCode, deviceInfo = 'Unknown' }) {
+  async verifyOtp({ mobileNumber, otp, customerName, referredByCode, deviceInfo = 'Unknown', ipAddress = '' }) {
     const storedData = await Otp.findOne({ mobileNumber });
     
     if (!storedData) {
@@ -100,11 +100,23 @@ class AuthService {
         customerName: customerName || 'New Customer',
         mobileNumber: mobileNumber,
         referralCode: generateUniqueCode(),
-        walletBalance: 0,
+        walletBalance: 100,
         rewardsPoints: 0,
         email: '',
         dob: '',
-        gender: ''
+        gender: '',
+        signupIp: ipAddress
+      });
+
+      // Log 100 SawariCash signup bonus
+      global.walletTransactions = global.walletTransactions || [];
+      global.walletTransactions.push({
+        id: `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        customerId: user._id.toString(),
+        type: 'credit',
+        amount: 100,
+        description: 'Signup Bonus',
+        date: new Date().toISOString()
       });
 
       // Track referral if referredByCode is provided

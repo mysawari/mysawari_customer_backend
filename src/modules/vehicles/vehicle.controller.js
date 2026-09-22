@@ -7,7 +7,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // Only what the app actually uses — the full documents carry maintenance history,
 // company / creator ids and more, which made every load roughly twice as heavy.
 const VEHICLE_FIELDS =
-  'vehicleName vehicleType fuelType transmission seatingCapacity status isDeleted pricePerDay images.url maintenance.estimatedCompletionDate';
+  'vehicleName vehicleNumber manufacturer model variant vehicleType fuelType transmission seatingCapacity color registrationDate status isDeleted pricePerDay images.url maintenance.estimatedCompletionDate';
 
 // Short-lived cache so a burst of users (or one user opening three screens) costs
 // one database read, not many. It is dropped whenever this API changes a booking,

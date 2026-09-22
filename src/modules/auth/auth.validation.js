@@ -11,7 +11,13 @@ const verifyOtpSchema = Joi.object({
   referredByCode: Joi.string().allow('').optional(),
 });
 
+const referSchema = Joi.object({
+  mobileNumber: Joi.string().required(),
+  name: Joi.string().allow('').max(60).optional(),
+});
+
 module.exports = {
   sendOtpSchema,
-  verifyOtpSchema
+  verifyOtpSchema,
+  referSchema
 };

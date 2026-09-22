@@ -1,13 +1,15 @@
 const AuthService = require('./auth.service');
 const ApiResponse = require('../../common/utils/api-response');
 const asyncHandler = require('../../common/utils/async-handler');
-const { sendOtpSchema, verifyOtpSchema } = require('./auth.validation');
+const { sendOtpSchema, verifyOtpSchema, referSchema } = require('./auth.validation');
+const ReferralService = require('../referrals/referral.service');
 const AppError = require('../../common/errors/app-error');
 const Booking = require('../../models/booking.model');
 
 class AuthController {
   constructor() {
     this.service = new AuthService();
+    this.referrals = new ReferralService();
   }
 
   sendOtp = asyncHandler(async (req, res) => {
@@ -21,8 +23,8 @@ class AuthController {
   verifyOtp = asyncHandler(async (req, res) => {
     const { error, value } = verifyOtpSchema.validate(req.body);
     if (error) throw new AppError(error.details[0].message, 400);
-
-    const result = await this.service.verifyOtp(value);
+    const ipAddress = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || 'Unknown';
+    const result = await this.service.verifyOtp({ ...value, ipAddress });
     return ApiResponse.success(res, result, 'Logged in successfully');
   });
 
@@ -37,25 +39,17 @@ class AuthController {
   });
 
   getMyReferrals = asyncHandler(async (req, res) => {
-    const userId = req.user._id.toString();
-    const myReferrals = (global.referralStore || []).filter(r => r.referrerId === userId);
+    // Pay out any commission that has become due (a referred person's trip completing) before listing.
+    await this.referrals.settle(req.user._id);
+    return ApiResponse.success(res, await this.referrals.list(req.user._id));
+  });
 
-    const enrichedReferrals = await Promise.all(
-      myReferrals.map(async (ref) => {
-        const completedRides = await Booking.countDocuments({
-          mobileNumber: ref.referredMobile,
-          status: 'completed'
-        });
-        return {
-          id: ref.id,
-          referredName: ref.referredName,
-          signupAt: ref.signupAt,
-          status: completedRides > 0 ? 'REWARDED' : 'SIGNED_UP'
-        };
-      })
-    );
+  addReferral = asyncHandler(async (req, res) => {
+    const { error, value } = referSchema.validate(req.body);
+    if (error) throw new AppError(error.details[0].message, 400);
 
-    return ApiResponse.success(res, enrichedReferrals);
+    const referral = await this.referrals.addReferral(req.user, value);
+    return ApiResponse.success(res, { id: String(referral._id), mobileNumber: referral.mobileNumber }, 'Referral added', 201);
   });
 }
 

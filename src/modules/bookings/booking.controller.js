@@ -6,6 +6,7 @@ const mongoose = require('mongoose');
 const Booking = require('../../models/booking.model');
 const Vehicle = require('../../models/vehicle.model');
 const Customer = require('../../models/customer.model');
+const CustomerAppLead = require('../../models/customer_app_lead.model');
 const AppError = require('../../common/errors/app-error');
 const paymentService = require('../payments/payment.service');
 const { invalidateVehicleCache } = require('../vehicles/vehicle.controller');
@@ -100,6 +101,7 @@ class BookingController {
       pickupTime, dropTime, razorpayOrderId, razorpayPaymentId,
     } = req.body;
     const sawariCashUsed = Math.max(0, Number(req.body.sawariCashUsed) || 0);
+    const clientSubscriptionDiscount = Math.max(0, Number(req.body.subscriptionDiscount) || 0);
 
     if (!mongoose.isValidObjectId(vehicleId)) throw new AppError('Invalid vehicle', 400);
     const from = new Date(fromDate);
@@ -138,11 +140,43 @@ class BookingController {
     if (paidOnline + sawariCashUsed <= 0) {
       throw new AppError('A booking advance is required', 400);
     }
-    // The advance is the fixed booking amount — never more, and exactly that once the trip costs at least that much.
-    const advance = paidOnline + sawariCashUsed;
+    
+    // Validate SawariCash limit (max 45% of rental amount)
+    const maxSawariCashAllowed = expectedTotal * 0.45;
+    if (sawariCashUsed > maxSawariCashAllowed) {
+      throw new AppError('SawariCash usage limit exceeded', 400);
+    }
+
     const rentalAfterDiscount = Math.max(0, expectedTotal - discount);
-    if (advance > BOOKING_ADVANCE_AMOUNT || (rentalAfterDiscount >= BOOKING_ADVANCE_AMOUNT && advance !== BOOKING_ADVANCE_AMOUNT)) {
-      throw new AppError(`The booking amount must be ₹${BOOKING_ADVANCE_AMOUNT}`, 400);
+    const appliedToAdvance = Math.min(sawariCashUsed, BOOKING_ADVANCE_AMOUNT);
+    const requiredOnline = Math.max(0, Math.min(rentalAfterDiscount, BOOKING_ADVANCE_AMOUNT) - appliedToAdvance);
+
+    if (paidOnline !== requiredOnline) {
+      throw new AppError(`The online booking advance must be ₹${requiredOnline}`, 400);
+    }
+
+    // ── Membership / subscription discount validation ──────────────────────
+    const PLANS = {
+      starter: { discountRate: 0.05,  annualCap: 10000 },
+      plus:    { discountRate: 0.10,  annualCap: 15000 },
+      pro:     { discountRate: 0.125, annualCap: 20000 },
+    };
+    const PER_TRIP_CAP = 999;
+    const customer = await Customer.findById(req.user._id);
+    const mem = customer?.membership || {};
+    const memActive = mem.plan && PLANS[mem.plan] && mem.expiresAt && new Date(mem.expiresAt) > new Date();
+    let serverSubscriptionDiscount = 0;
+    if (memActive) {
+      const { discountRate, annualCap } = PLANS[mem.plan];
+      const remaining = Math.max(0, annualCap - (mem.totalSaved || 0));
+      serverSubscriptionDiscount = Math.min(
+        Math.round(rentalAfterDiscount * discountRate),
+        PER_TRIP_CAP,
+        remaining
+      );
+    }
+    if (clientSubscriptionDiscount !== serverSubscriptionDiscount) {
+      throw new AppError('Subscription discount mismatch — please refresh and try again', 400);
     }
 
     const clash = await Booking.exists({
@@ -184,19 +218,38 @@ class BookingController {
         customerName: req.user.customerName,
         vehicleId,
         vehicleName: vehicle.vehicleName,
+        vehicleNumber: vehicle.vehicleNumber || '',
+        vehicleColor: vehicle.color || '',
         tripType: 'local',
         fromDate: from,
         toDate: to,
         pickupTime,
         dropTime,
         totalDays: days,
+        destination: req.body.destination || '',
+        pickup: req.body.pickup || { location: '', landmark: '', mapLink: '', charge: 0 },
+        drop: req.body.drop || { location: '', landmark: '', mapLink: '', charge: 0 },
+        membershipDiscount: serverSubscriptionDiscount,
         payment: {
+          vehicleRent: req.body.payment?.vehicleRent || expectedTotal,
+          pickupCharge: req.body.payment?.pickupCharge || 0,
+          dropCharge: req.body.payment?.dropCharge || 0,
+          fastagAmount: req.body.payment?.fastagAmount || 0,
           totalAmount: expectedTotal,
           discountAmount: discount,
+          securityDeposit: req.body.payment?.securityDeposit || 0,
           bookingAmountPaid: paidOnline,
-          balanceAmount: Math.max(0, Number(payment.balanceAmount) || 0),
           paymentMethod: paidOnline > 0 ? 'online' : 'wallet',
+          balanceAmount: Math.max(0, Number(payment.balanceAmount) || 0),
           paymentStatus: 'paid',
+        },
+        paymentBreakdown: req.body.paymentBreakdown || {
+          cash: 0,
+          phonePe: 0,
+          razorpay: paidOnline,
+          balanceAmount: Math.max(0, Number(payment.balanceAmount) || 0),
+          totalCollected: paidOnline,
+          paymentStatus: 'partial',
         },
         status: 'confirmed',
       });
@@ -214,6 +267,22 @@ class BookingController {
       global.bookingSawariCash[booking._id.toString()] = sawariCashUsed;
       logWalletTx(req.user._id, 'debit', sawariCashUsed, `Used SawariCash for booking ${vehicle.vehicleName}`);
     }
+
+    // Track subscription savings
+    if (serverSubscriptionDiscount > 0 && customer) {
+      await Customer.updateOne(
+        { _id: req.user._id },
+        { $inc: { 'membership.totalSaved': serverSubscriptionDiscount } }
+      );
+      logWalletTx(req.user._id, 'membership_discount', serverSubscriptionDiscount,
+        `Membership discount on ${vehicle.vehicleName}`);
+    }
+
+    // Mark any abandoned lead for this user as recovered
+    await CustomerAppLead.updateOne(
+      { mobileNumber: req.user.mobileNumber, status: 'abandoned' },
+      { $set: { status: 'recovered' } }
+    );
 
     invalidateVehicleCache(); // availability just changed
     return ApiResponse.success(res, booking, 'Booking created', 201);
@@ -348,10 +417,8 @@ class BookingController {
     const confirmedBookings = allBookings.filter(b => ['confirmed', 'ongoing', ON_TRIP_STATUS].includes(b.status));
     const cancelledBookings = allBookings.filter(b => b.status === 'cancelled');
 
-    const totalRides = completedBookings.length + confirmedBookings.length;
-    const totalSpent = allBookings
-      .filter(b => b.status !== 'cancelled')
-      .reduce((sum, b) => sum + (b.payment?.totalAmount || 0), 0);
+    const totalRides = completedBookings.length;
+    const totalSpent = completedBookings.reduce((sum, b) => sum + (b.payment?.totalAmount || 0), 0);
 
     const tier = computeTier(totalRides);
 
