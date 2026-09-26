@@ -77,7 +77,8 @@ const bookingSchema = new mongoose.Schema({
   
   cancellationReason: { type: String },
   assignedDriver: { type: mongoose.Schema.Types.ObjectId, ref: 'Driver' },
-  membershipDiscount: { type: Number, default: 0 }
+  membershipDiscount: { type: Number, default: 0 },
+  expiresAt: { type: Date, index: { expireAfterSeconds: 0 } }
 }, {
   timestamps: true
 });

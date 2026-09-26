@@ -34,6 +34,19 @@ class CustomerController {
       next(error);
     }
   }
+  async deleteProfile(req, res, next) {
+    try {
+      const customerId = req.user.id;
+      await this.customerService.deleteAccount(customerId);
+      
+      res.status(200).json({
+        status: 'success',
+        message: 'Account deleted successfully'
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 module.exports = CustomerController;

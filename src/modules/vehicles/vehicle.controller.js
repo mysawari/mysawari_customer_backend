@@ -1,13 +1,16 @@
 const Vehicle = require('../../models/vehicle.model');
 const Booking = require('../../models/booking.model');
 const { CLOSED_BOOKING_STATUSES } = require('../bookings/booking.constants');
+const { blockingFilter } = require('../bookings/booking.holds');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Only what the app actually uses — the full documents carry maintenance history,
 // company / creator ids and more, which made every load roughly twice as heavy.
 const VEHICLE_FIELDS =
-  'vehicleName vehicleNumber manufacturer model variant vehicleType fuelType transmission seatingCapacity color registrationDate status isDeleted pricePerDay images.url maintenance.estimatedCompletionDate';
+  // vehicleNumber (the registration / number plate) is deliberately NOT public: the plates are blurred
+  // out of every photo, so publishing the number as text would undo that. The app never displays it.
+  'vehicleName manufacturer model variant vehicleType fuelType transmission seatingCapacity color registrationDate status isDeleted pricePerDay images.url maintenance.estimatedCompletionDate';
 
 // Short-lived cache so a burst of users (or one user opening three screens) costs
 // one database read, not many. It is dropped whenever this API changes a booking,
@@ -33,6 +36,8 @@ async function buildPayload() {
       status: { $nin: CLOSED_BOOKING_STATUSES },
       isDeleted: { $ne: true },
       toDate: { $gte: cutoff },
+      // Open bookings, operations-app pending bookings and live checkout holds (same rule as booking).
+      $and: [blockingFilter()],
     })
       .select('vehicleId fromDate toDate status')
       .lean(),
@@ -52,6 +57,7 @@ async function buildPayload() {
 
   const data = vehicles.map((vehicle) => {
     const { maintenance, ...rest } = vehicle;
+    
     return {
       ...rest,
       bookedRanges: (rangesByVehicle.get(vehicle._id.toString()) || []).sort(
@@ -62,6 +68,28 @@ async function buildPayload() {
   });
 
   return { success: true, count: data.length, generatedAt: new Date().toISOString(), data };
+}
+
+// Helper to dynamically format image URLs for the current request host
+function applyDynamicImageProxy(req, payload) {
+  const protocol = req.protocol || 'http';
+  // Use the actual Host header so it works on LAN IPs (192.168.x.x) or localhost correctly
+  const host = req.get('host') || 'localhost:5001';
+  const baseUrl = `${protocol}://${host}`;
+  
+  return {
+    ...payload,
+    data: payload.data.map(vehicle => {
+      const proxyImages = (vehicle.images || []).map(img => {
+        if (!img.url) return img;
+        return {
+          ...img,
+          url: `${baseUrl}/api/images/blur?target=${encodeURIComponent(img.url)}`
+        };
+      });
+      return { ...vehicle, images: proxyImages };
+    })
+  };
 }
 
 class VehicleController {
@@ -76,7 +104,7 @@ class VehicleController {
   static async getAvailableVehicles(req, res, next) {
     try {
       if (cache && Date.now() - cache.at < CACHE_TTL_MS) {
-        return res.status(200).json(cache.payload);
+        return res.status(200).json(applyDynamicImageProxy(req, cache.payload));
       }
       // Concurrent requests share one database read.
       if (!inFlight) {
@@ -84,7 +112,7 @@ class VehicleController {
       }
       const payload = await inFlight;
       cache = { at: Date.now(), payload };
-      return res.status(200).json(payload);
+      return res.status(200).json(applyDynamicImageProxy(req, payload));
     } catch (error) {
       console.error('Error fetching vehicles:', error);
       next(error);

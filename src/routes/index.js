@@ -18,5 +18,8 @@ router.use('/reviews', reviewRoutes);
 router.use('/vehicles', require('../modules/vehicles/vehicle.routes'));
 router.use('/payments', require('../modules/payments/payment.routes'));
 router.use('/leads', require('../modules/leads/lead.routes'));
+router.use('/offers', require('../modules/coupons/coupon.routes'));
+router.use('/notifications', require('../modules/notifications/notification.routes'));
+router.use('/images', require('../modules/images/image.routes'));
 
 module.exports = router;

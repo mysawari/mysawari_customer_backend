@@ -130,6 +130,55 @@ class WatiService {
       return false; // Non-fatal for cron jobs
     }
   }
+
+  /**
+   * Send a generic WhatsApp template message
+   */
+  async sendTemplateMessage(mobile, templateName, parameters = []) {
+    if (!this.accessToken) {
+      console.warn('WATI_ACCESS_TOKEN is missing. Skipping WhatsApp delivery.');
+      return false;
+    }
+
+    try {
+      const cleanMobile = mobile.replace(/[^0-9]/g, '');
+      const finalMobile = cleanMobile.length === 10 ? `91${cleanMobile}` : cleanMobile;
+
+      const endpoint = `${this.apiUrl}/api/v1/sendTemplateMessage?whatsappNumber=${finalMobile}`;
+      
+      const payload = {
+        template_name: templateName,
+        broadcast_name: "custom_notification_broadcast",
+        parameters: parameters
+      };
+
+      const headers = {
+        'Authorization': `Bearer ${this.accessToken}`,
+        'Content-Type': 'application/json'
+      };
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload)
+      });
+
+      const responseText = await response.text();
+      let data = {};
+      try { data = JSON.parse(responseText); } catch (e) {}
+
+      if (!response.ok || data.result === false) {
+        console.error(`❌ WATI API Rejection details for ${templateName}:`, responseText);
+        return false;
+      }
+
+      console.log(`💬 WhatsApp Template [${templateName}] sent to +${finalMobile} via WATI`);
+      return true;
+    } catch (error) {
+      console.error(`[WatiService] Failed to send template ${templateName} to ${mobile}:`, error.message);
+      return false;
+    }
+  }
 }
 
 module.exports = new WatiService();

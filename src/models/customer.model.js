@@ -58,23 +58,16 @@ const customerSchema = new mongoose.Schema({
     type: Number, 
     default: 0 
   },
-  // Phone numbers this customer has referred. Additive: existing customers simply have an empty list.
-  referrals: [{
-    mobileNumber: { type: String, required: true, trim: true },
-    name: { type: String, trim: true, default: '' },
-    status: { type: String, enum: ['invited', 'rewarded', 'fraudulent'], default: 'invited' },
-    invitedAt: { type: Date, default: Date.now },
-    // Set once, when the referred person's first trip completes and the commission is credited.
-    rewardBookingId: { type: mongoose.Schema.Types.ObjectId, ref: 'Booking' },
-    commissionAmount: { type: Number, default: 0 },
-    rewardedAt: { type: Date }
-  }],
-  // Membership / subscription plan
-  membership: {
-    plan: { type: String, enum: ['starter', 'plus', 'pro', ''], default: '' },
-    activatedAt: { type: Date },
-    expiresAt: { type: Date },
-    totalSaved: { type: Number, default: 0 },
+  membershipId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Membership',
+    default: null
+  },
+  // Which customer referred this person (set on signup if referral code used)
+  referredBy: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'Customer',
+    default: null 
   },
   // Withdrawal requests submitted by the customer
   withdrawalRequests: [{

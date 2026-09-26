@@ -3,7 +3,11 @@ const Review = require('../../models/review.model');
 const Booking = require('../../models/booking.model');
 const AppError = require('../../common/errors/app-error');
 const cloudinary = require('../../integrations/cloudinary.service');
+const Vehicle = require('../../models/vehicle.model');
 const { RIDE_STATUSES } = require('../bookings/booking.constants');
+
+/** Vehicle photos only ever leave the API through the number-plate blurring endpoint. */
+const plateSafeUrl = (url) => (url ? `/api/images/blur?target=${encodeURIComponent(url)}` : null);
 
 class ReviewService {
   /**
@@ -48,6 +52,10 @@ class ReviewService {
       isVerified = true;
     } else {
       if (!vehicleKey) throw new AppError('Please provide carId, rating, and text', 400);
+      // Only real, live vehicles can be reviewed (any string used to create a review page).
+      if (!mongoose.isValidObjectId(vehicleKey) || !(await Vehicle.exists({ _id: vehicleKey, isDeleted: { $ne: true } }))) {
+        throw new AppError('Vehicle not found', 404);
+      }
 
       const existing = await Review.exists({ userId: customer._id, carId: vehicleKey });
       if (existing) throw new AppError('You have already reviewed this vehicle.', 400);
@@ -110,7 +118,7 @@ class ReviewService {
         bookingId: b._id,
         carId: String(b.vehicleId?._id || b.vehicleId),
         vehicleName: b.vehicleId?.vehicleName || b.vehicleName || 'Vehicle',
-        vehicleImage: b.vehicleId?.images?.[0]?.url || null,
+        vehicleImage: plateSafeUrl(b.vehicleId?.images?.[0]?.url),
         fromDate: b.fromDate,
         toDate: b.toDate,
       }));
@@ -133,9 +141,11 @@ class ReviewService {
 
   /** Get all reviews for a specific car */
   async getReviewsForCar(carId) {
+    if (typeof carId !== 'string' || carId.length > 64) return [];
     const reviews = await Review.find({ carId: String(carId) })
       .populate('userId', 'customerName')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .limit(200);
 
     return reviews.map((r) => this.format(r, r.userId?.customerName));
   }

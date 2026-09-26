@@ -5,7 +5,10 @@ const AppError = require('../../common/errors/app-error');
 
 class ReviewController {
   createReview = asyncHandler(async (req, res) => {
-    const { carId, rating, text, bookingId } = req.body;
+    const { carId, rating, text, bookingId } = req.body || {};
+    if ((carId !== undefined && typeof carId !== 'string') || (bookingId !== undefined && typeof bookingId !== 'string')) {
+      throw new AppError('Invalid review', 400);
+    }
 
     if ((!carId && !bookingId) || !rating || !text) {
       throw new AppError('Please provide carId, rating, and text', 400);

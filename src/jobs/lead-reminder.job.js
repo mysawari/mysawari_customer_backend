@@ -15,19 +15,32 @@ const sendAbandonedCartReminders = async () => {
     });
 
     for (const lead of leadsToRemind) {
-      console.log(`[LeadJob] Processing abandoned cart for ${lead.mobileNumber}`);
+      // Atomically claim the lead to prevent concurrent worker overlaps (e.g. cluster mode)
+      const claimedLead = await CustomerAppLead.findOneAndUpdate(
+        { _id: lead._id, status: 'abandoned', whatsappSent: false },
+        { $set: { whatsappSent: true, status: 'messaged' } },
+        { new: true }
+      );
+
+      // If another worker already claimed it, skip
+      if (!claimedLead) continue;
+
+      console.log(`[LeadJob] Processing abandoned cart for ${claimedLead.mobileNumber}`);
       
       const success = await watiService.sendAbandonedCartReminder(
-        lead.mobileNumber, 
-        lead.customerName, 
-        lead.vehicleName
+        claimedLead.mobileNumber, 
+        claimedLead.customerName, 
+        claimedLead.vehicleName
       );
 
       if (success) {
-        lead.whatsappSent = true;
-        lead.status = 'messaged';
-        await lead.save();
-        console.log(`[LeadJob] Successfully messaged ${lead.mobileNumber}`);
+        console.log(`[LeadJob] Successfully messaged ${claimedLead.mobileNumber}`);
+      } else {
+        // Rollback if the message failed to send
+        await CustomerAppLead.updateOne(
+          { _id: lead._id },
+          { $set: { whatsappSent: false, status: 'abandoned' } }
+        );
       }
     }
   } catch (error) {
@@ -36,9 +49,9 @@ const sendAbandonedCartReminders = async () => {
 };
 
 const startLeadJobs = () => {
-  console.log('⏱️  Starting Lead Reminder Background Job (Interval: 15 minutes)');
-  // Check every 15 minutes
-  setInterval(sendAbandonedCartReminders, 15 * 60 * 1000);
+  console.log('⏱️  Starting Lead Reminder Background Job (Interval: 5 minutes)');
+  // Check every 5 minutes for accuracy
+  setInterval(sendAbandonedCartReminders, 5 * 60 * 1000);
   
   // Also run once on startup after 1 minute (to let DB connect)
   setTimeout(sendAbandonedCartReminders, 60 * 1000);

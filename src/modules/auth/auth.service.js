@@ -4,11 +4,54 @@ const watiService = require('../../integrations/wati.service');
 const Customer = require('../../models/customer.model');
 const Otp = require('../../models/otp.model');
 const Token = require('../../models/token.model');
+const Referral = require('../../models/referral.model');
 const AppError = require('../../common/errors/app-error');
 const secrets = require('../../config/secrets');
+const publicCustomer = require('../../common/utils/public-customer');
+const { normalizeIp, sameNetwork } = require('../../common/utils/client-ip');
+const { installIdFromDeviceInfo } = require('../../common/utils/device');
 
-// Initialize in-memory referral store
-global.referralStore = global.referralStore || [];
+/**
+ * Is this referral suspicious? Checked when the referred person creates their account.
+ *  1. Same network as the referrer's own signup (IPv4 address / IPv6 /64).
+ *  2. Same phone: the referrer has a session from the very same app install.
+ *  3. Farming: the referrer already has 2+ referred signups from this network in the last 24 hours.
+ * Carrier NAT means one shared IP alone is only a signal; the same-install check is the strongest one.
+ */
+async function isSuspiciousReferral(referrer, ipAddress, installId) {
+  if (sameNetwork(referrer.signupIp, ipAddress)) return 'same_network_as_referrer';
+  if (installId) {
+    const sessions = await Token.find({ customerId: referrer._id }).select('deviceInfo').limit(50).lean();
+    if (sessions.some((t) => installIdFromDeviceInfo(t.deviceInfo) === installId)) return 'same_device_as_referrer';
+  }
+  if (ipAddress) {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const recent = await Customer.find({ referredBy: referrer._id, createdAt: { $gte: since } })
+      .select('signupIp').limit(100).lean();
+    if (recent.filter((c) => sameNetwork(c.signupIp, ipAddress)).length >= 2) return 'referral_burst_same_network';
+  }
+  return null;
+}
+
+const MAX_OTP_ATTEMPTS = 5;
+// Per-number send limits (on top of the per-IP route limiter), so rotating IPs can't be used to
+// flood one person with WhatsApp codes or to keep issuing fresh codes to brute-force.
+const OTP_RESEND_COOLDOWN_MS = 30 * 1000;
+const OTP_SENDS_PER_HOUR = 5;
+const otpSendLog = new Map(); // mobileNumber -> [timestamps]
+
+function checkOtpSendAllowed(mobileNumber, now = Date.now()) {
+  const recent = (otpSendLog.get(mobileNumber) || []).filter((t) => now - t < 60 * 60 * 1000);
+  if (recent.length && now - recent[recent.length - 1] < OTP_RESEND_COOLDOWN_MS) {
+    throw new AppError('Please wait a few seconds before requesting another OTP', 429);
+  }
+  if (recent.length >= OTP_SENDS_PER_HOUR) {
+    throw new AppError('Too many OTP requests for this number. Please try again later.', 429);
+  }
+  recent.push(now);
+  otpSendLog.set(mobileNumber, recent);
+  if (otpSendLog.size > 50000) otpSendLog.delete(otpSendLog.keys().next().value);
+}
 
 class AuthService {
   constructor() {
@@ -39,12 +82,13 @@ class AuthService {
   }
 
   async sendOtp({ mobileNumber }) {
+    checkOtpSendAllowed(mobileNumber);
     const otp = crypto.randomInt(1000, 10000).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
     
     await Otp.findOneAndUpdate(
       { mobileNumber },
-      { otp, expiresAt },
+      { otp, expiresAt, attempts: 0 },
       { upsert: true, new: true }
     );
     
@@ -54,7 +98,7 @@ class AuthService {
 
       // Never log the OTP itself in production.
       console.log(`💬 WhatsApp OTP Request Queued: ${mobileNumber}`);
-      if (!secrets.isProduction) {
+      if (secrets.isDevelopment) {
         console.log(`🔒 Developer Override Code: ${otp}`);
       }
       
@@ -67,25 +111,48 @@ class AuthService {
     }
   }
 
-  async verifyOtp({ mobileNumber, otp, customerName, referredByCode, deviceInfo = 'Unknown', ipAddress = '' }) {
-    const storedData = await Otp.findOne({ mobileNumber });
-    
+  async verifyOtp({ mobileNumber, otp, customerName, referredByCode, deviceInfo = 'Unknown', ipAddress = '', installId = '' }) {
+    ipAddress = normalizeIp(ipAddress);
+    let isNewAccount = false;
+    let referralFlagged = null;
+    // Count the attempt atomically BEFORE comparing. The old read-compare-then-increment let many
+    // parallel guesses all read attempts=0 and bypass the 5-attempt limit on a 4-digit code.
+    const storedData = await Otp.findOneAndUpdate(
+      { mobileNumber, attempts: { $lt: MAX_OTP_ATTEMPTS } },
+      { $inc: { attempts: 1 } },
+      { new: true }
+    );
+
     if (!storedData) {
+      const exists = await Otp.exists({ mobileNumber });
+      if (exists) {
+        await Otp.deleteOne({ mobileNumber });
+        throw new AppError('Too many incorrect attempts. Please request a new OTP.', 400);
+      }
       throw new AppError('Please request a new OTP first', 400);
     }
     if (new Date() > storedData.expiresAt) {
       await Otp.deleteOne({ mobileNumber });
       throw new AppError('OTP has expired', 400);
     }
-    if (storedData.otp !== otp) {
+    // Timing-safe comparison to prevent side-channel attacks
+    const storedOtpBuf = Buffer.from(String(storedData.otp || ''));
+    const providedOtpBuf = Buffer.from(String(otp || ''));
+    const isValid = storedOtpBuf.length === providedOtpBuf.length && crypto.timingSafeEqual(storedOtpBuf, providedOtpBuf);
+    if (!isValid) {
       throw new AppError('Invalid OTP', 400);
     }
 
-    await Otp.deleteOne({ mobileNumber });
+    // Single use: only the request that actually deletes this exact code may log in with it.
+    const consumed = await Otp.findOneAndDelete({ _id: storedData._id, otp: storedData.otp });
+    if (!consumed) {
+      throw new AppError('Please request a new OTP first', 400);
+    }
 
     let user = await Customer.findOne({ mobileNumber });
     
     if (!user) {
+      isNewAccount = true;
       const generateUniqueCode = () => {
         const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
         let code = '';
@@ -95,9 +162,13 @@ class AuthService {
         }
         return code;
       };
-      
+      let referrer = null;
+      if (referredByCode && referredByCode.trim().length > 0) {
+        referrer = await Customer.findOne({ referralCode: referredByCode.trim().toUpperCase() });
+      }
+
       user = await Customer.create({
-        customerName: customerName || 'New Customer',
+        customerName: (customerName || '').trim().slice(0, 60) || 'New Customer',
         mobileNumber: mobileNumber,
         referralCode: generateUniqueCode(),
         walletBalance: 100,
@@ -105,34 +176,48 @@ class AuthService {
         email: '',
         dob: '',
         gender: '',
-        signupIp: ipAddress
+        signupIp: ipAddress,
+        referredBy: referrer ? referrer._id : null
       });
 
-      // Log 100 SawariCash signup bonus
-      global.walletTransactions = global.walletTransactions || [];
-      global.walletTransactions.push({
-        id: `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        customerId: user._id.toString(),
-        type: 'credit',
-        amount: 100,
-        description: 'Signup Bonus',
-        date: new Date().toISOString()
-      });
-
-      // Track referral if referredByCode is provided
-      if (referredByCode && referredByCode.trim().length > 0) {
-        const referrer = await Customer.findOne({ referralCode: referredByCode.trim().toUpperCase() });
-        if (referrer) {
-          global.referralStore.push({
-            id: `ref_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-            referrerId: referrer._id.toString(),
-            referredId: user._id.toString(),
-            referredName: user.customerName,
-            referredMobile: user.mobileNumber,
-            signupAt: new Date().toISOString()
-          });
-        }
+      // Log 100 SawariCash signup bonus (Expires in 30 days)
+      const SawariCashTransaction = require('../../models/sawaricash_transaction.model');
+      try {
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + 30);
+        await SawariCashTransaction.create({
+          customerId: user._id,
+          amount: 100,
+          transactionType: 'credit',
+          reason: 'Signup Bonus',
+          status: 'completed',
+          expiresAt
+        });
+      } catch (err) {
+        console.error('Failed to log signup bonus transaction:', err);
       }
+
+      // Track referral
+      if (referrer) {
+        referralFlagged = await isSuspiciousReferral(referrer, ipAddress, installId);
+        const isFraud = Boolean(referralFlagged);
+        
+        await Referral.findOneAndUpdate(
+          { referrerId: referrer._id, referredMobile: mobileNumber },
+          {
+            $set: {
+              referredId: user._id,
+              referredName: user.customerName,
+              status: isFraud ? 'fraudulent' : 'invited',
+            }
+          },
+          { upsert: true }
+        );
+      }
+    }
+
+    if (user.status === 'blocked') {
+      throw new AppError('Account is blocked', 403);
     }
 
     const { accessToken, refreshToken } = this.generateTokens(user);
@@ -145,7 +230,19 @@ class AuthService {
       deviceInfo
     });
     
-    return { token: accessToken, refreshToken, customer: user };
+    return { token: accessToken, refreshToken, customer: publicCustomer(user), isNewAccount, referralFlagged };
+  }
+
+  /** Server-side logout: the refresh token is deleted, so it can't be used again even if it was copied. */
+  async revokeRefreshToken(refreshTokenStr) {
+    let decoded;
+    try {
+      decoded = jwt.verify(refreshTokenStr, this.JWT_REFRESH_SECRET, { issuer: this.JWT_ISSUER, audience: this.JWT_AUDIENCE });
+    } catch {
+      return false;
+    }
+    const removed = await Token.findOneAndDelete({ token: refreshTokenStr, customerId: decoded.id });
+    return !!removed;
   }
 
   async refreshToken(refreshTokenStr, deviceInfo = 'Unknown') {
@@ -163,13 +260,10 @@ class AuthService {
       throw new AppError('Invalid or expired refresh token', 401);
     }
 
-    const storedToken = await Token.findOne({ token: refreshTokenStr });
-    
+    // Atomically take the stored token out, so two parallel refreshes with the same token can't both
+    // mint a new session (only the request that deletes it continues).
+    const storedToken = await Token.findOneAndDelete({ token: refreshTokenStr, customerId: decoded.id });
     if (!storedToken || storedToken.revoked) {
-      // If a revoked token is used, it could mean token theft. We could proactively revoke all tokens for this user.
-      if (storedToken && storedToken.revoked) {
-         await Token.deleteMany({ customerId: decoded.id });
-      }
       throw new AppError('Invalid refresh token', 401);
     }
 
@@ -177,9 +271,6 @@ class AuthService {
     if (!user || user.status === 'blocked') {
       throw new AppError('User not found or blocked', 401);
     }
-
-    // Revoke old token and issue a new pair
-    await Token.findByIdAndDelete(storedToken._id);
 
     const { accessToken, refreshToken } = this.generateTokens(user);
 
@@ -190,7 +281,7 @@ class AuthService {
       deviceInfo
     });
 
-    return { token: accessToken, refreshToken, customer: user };
+    return { token: accessToken, refreshToken, customer: publicCustomer(user) };
   }
 }
 

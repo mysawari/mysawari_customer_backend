@@ -13,6 +13,12 @@ const otpSchema = new mongoose.Schema({
   expiresAt: {
     type: Date,
     required: true
+  },
+  // A 4-digit code only has 9000 possibilities — per-IP rate limiting alone doesn't stop an
+  // attacker who spreads guesses across IPs. This bounds guesses per issued code regardless of IP.
+  attempts: {
+    type: Number,
+    default: 0
   }
 }, { timestamps: true });
 
