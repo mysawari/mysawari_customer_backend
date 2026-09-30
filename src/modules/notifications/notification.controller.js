@@ -59,6 +59,22 @@ class NotificationController {
     return ApiResponse.success(res, device, 'Device registered');
   });
 
+  // POST /api/notifications/register-anonymous-device
+  registerAnonymousDevice = asyncHandler(async (req, res) => {
+    const customerId = null;
+    const { expoPushToken } = req.body || {};
+    const deviceType = ['ios', 'android', 'web'].includes(req.body?.deviceType) ? req.body.deviceType : 'unknown';
+    if (!expoPushToken || typeof expoPushToken !== 'string' || expoPushToken.length > 200) {
+      throw new AppError('A valid Expo Push Token is required', 400);
+    }
+    // Basic Expo token format validation
+    if (!expoPushToken.startsWith('ExponentPushToken[') && !expoPushToken.startsWith('ExpoPushToken[')) {
+      throw new AppError('Invalid Expo Push Token format', 400);
+    }
+    const device = await notificationService.registerDevice(customerId, expoPushToken, deviceType);
+    return ApiResponse.success(res, device, 'Anonymous device registered');
+  });
+
   // POST /api/notifications/unregister-device
   unregisterDevice = asyncHandler(async (req, res) => {
     const customerId = req.user._id;

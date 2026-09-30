@@ -9,13 +9,15 @@ class NotificationService {
   async registerDevice(customerId, expoPushToken, deviceType) {
     let device = await CustomerDevice.findOne({ expoPushToken });
     if (device) {
-      if (device.customerId.toString() !== customerId.toString()) {
+      if ((!device.customerId && customerId) || (device.customerId && customerId && device.customerId.toString() !== customerId.toString())) {
         device.customerId = customerId;
         device.deviceType = deviceType || device.deviceType;
         await device.save();
+      } else if (!device.customerId && !customerId) {
+        // already anonymous
       }
     } else {
-      device = new CustomerDevice({ customerId, expoPushToken, deviceType });
+      device = new CustomerDevice({ customerId: customerId || undefined, expoPushToken, deviceType });
       await device.save();
     }
     return device;

@@ -19,10 +19,15 @@ class CouponService {
     const hit = offersCache.get(key);
     if (hit && Date.now() - hit.at < OFFERS_TTL_MS) return hit.promise;
 
-    const filter = { active: true, expiryDate: { $gte: new Date() } };
+    // Removed expiryDate check so offers show up even if the date is in the past, as requested
+    const filter = { active: true };
     if (type) filter.type = type;
-    // Concurrent requests share one read; a failed read is not cached.
-    const promise = Offer.find(filter).sort({ sortOrder: 1, createdAt: -1 }).lean();
+    
+    // Wrap the mongoose query in a standard JS Promise that can be awaited multiple times safely
+    const promise = (async () => {
+      return await Offer.find(filter).sort({ sortOrder: 1, createdAt: -1 }).lean();
+    })();
+
     offersCache.set(key, { at: Date.now(), promise });
     promise.catch(() => offersCache.delete(key));
     return promise;

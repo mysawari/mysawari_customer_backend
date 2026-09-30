@@ -22,6 +22,15 @@ const { BOOKING_ADVANCE_AMOUNT, ON_TRIP_STATUS, CLOSED_BOOKING_STATUSES, EXTENDA
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_TRACKED_BOOKINGS = 5000;
 
+const generateBookingCode = (name, phone) => {
+  const prefix = "MS";
+  const nameChar = name ? name.trim().charAt(0).toUpperCase() : "X";
+  const phoneSuffix = phone && phone.length >= 2 ? phone.slice(-2) : "00";
+  const dateDay = String(new Date().getDate()).padStart(2, '0');
+  const randomChars = Math.random().toString(36).substring(2, 6).toUpperCase();
+  return `${prefix}${nameChar}${phoneSuffix}${dateDay}${randomChars}`;
+};
+
 async function logWalletTx(customerId, type, amount, description) {
   try {
     await SawariCashTransaction.create({
@@ -107,9 +116,18 @@ class BookingController {
     }
 
     // Only the vehicle fields the app shows. The full document carried the raw (un-blurred) photo URLs.
-    const bookings = await Booking.find(query).populate('vehicleId', 'vehicleName pricePerDay').sort({ createdAt: -1 }).limit(300);
+    const bookings = await Booking.find(query).populate('vehicleId', 'vehicleName pricePerDay').sort({ createdAt: -1 }).limit(300).lean();
+    
+    const bookingIds = bookings.map(b => b._id);
+    const extensions = await ExtendBooking.find({ bookingId: { $in: bookingIds } }).lean();
+
+    const bookingsWithExts = bookings.map(b => {
+      const exts = extensions.filter(e => e.bookingId.toString() === b._id.toString());
+      return { ...b, extensions: exts };
+    });
+
     // Cancellation outcome is derived from the policy (no extra DB fields needed).
-    return ApiResponse.success(res, bookings.map(withCancellationOutcome));
+    return ApiResponse.success(res, bookingsWithExts.map(withCancellationOutcome));
   });
 
   getActiveHandover = asyncHandler(async (req, res) => {
@@ -214,6 +232,7 @@ class BookingController {
     let booking;
     try {
       booking = await Booking.create({
+        bookingCode: generateBookingCode(req.user.customerName, req.user.mobileNumber),
         mobileNumber: req.user.mobileNumber,
         customerName: req.user.customerName,
         vehicleId,
@@ -355,7 +374,7 @@ class BookingController {
 
   extendBooking = asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const { additionalDays, withDriver } = req.body || {};
+    const { additionalDays, withDriver, reason } = req.body || {};
     if (!mongoose.isValidObjectId(id)) throw new AppError('Booking not found', 404);
 
     const booking = await Booking.findOne({ _id: id, mobileNumber: req.user.mobileNumber });
@@ -389,8 +408,22 @@ class BookingController {
       additionalDays: quote.additionalDays,
       newToDate: quote.newTo,
       additionalAmount: quote.additionalAmount,
+      reason: reason || "No reason provided",
       status: 'pending' // No changes in other collections, ops app will review this
     });
+
+    // Notify Admins via Firebase Push Notification (using Cloud Function)
+    try {
+      const axios = require('axios');
+      const FIREBASE_URL = process.env.FIREBASE_FUNCTIONS_URL || 'https://us-central1-mysawari-customer-app.cloudfunctions.net';
+      await axios.post(`${FIREBASE_URL}/sendToAdmins`, {
+        title: "Extension Requested",
+        body: `Customer ${req.user.customerName || req.user.mobileNumber} requested an extension of ${quote.additionalDays} days for booking ${booking._id.toString().substring(0, 6)}`,
+        data: { bookingId: booking._id }
+      });
+    } catch (err) {
+      console.log('Firebase Admin Notification Failed:', err.message);
+    }
 
     return ApiResponse.success(res, extensionReq, 'Booking extension request submitted successfully');
   });
@@ -657,6 +690,7 @@ class BookingController {
 
       // Lock acquired successfully, create hold (every money field comes from resolveAmounts, never the client)
       bookingHold = await Booking.create({
+        bookingCode: generateBookingCode(req.user.customerName, req.user.mobileNumber),
         mobileNumber: req.user.mobileNumber,
         customerName: req.user.customerName,
         vehicleId,

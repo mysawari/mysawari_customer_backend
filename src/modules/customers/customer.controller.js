@@ -47,6 +47,22 @@ class CustomerController {
       next(error);
     }
   }
+
+  async updateLocation(req, res, next) {
+    try {
+      const customerId = req.user.id;
+      const { lat, lng } = req.body;
+      if (lat && lng) {
+        const Customer = require('../../models/customer.model');
+        await Customer.findByIdAndUpdate(customerId, {
+          $set: { 'lastLocation.lat': lat, 'lastLocation.lng': lng, 'lastLocation.updatedAt': new Date() }
+        });
+      }
+      res.status(200).json({ status: 'success' });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 module.exports = CustomerController;

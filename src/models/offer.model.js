@@ -17,7 +17,7 @@ const offerSchema = new mongoose.Schema({
   subtitle: { type: String, default: '' },
 
   // ── Coupon-specific fields ──
-  code: { type: String, sparse: true, uppercase: true, trim: true },
+  code: { type: String, uppercase: true, trim: true },
   discountType: { type: String, enum: ['FLAT', 'PERCENTAGE'] },
   discountValue: { type: Number },
   minimumBooking: { type: Number, default: 0 },

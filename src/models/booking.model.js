@@ -4,6 +4,7 @@ const bookingSchema = new mongoose.Schema({
   lead: { type: mongoose.Schema.Types.ObjectId, ref: 'Lead' },
   company: { type: mongoose.Schema.Types.ObjectId, ref: 'Company' },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  bookingCode: { type: String, index: true },
   customerName: { type: String, trim: true },
   mobileNumber: { type: String, required: true },
   alternateMobileNumber: { type: String, default: '' },

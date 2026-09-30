@@ -4,7 +4,6 @@ const customerDeviceSchema = new mongoose.Schema({
   customerId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Customer',
-    required: true,
     index: true,
   },
   expoPushToken: {

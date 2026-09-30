@@ -101,7 +101,7 @@ class WalletController {
       amount: t.transactionType === 'debit' ? -t.amount : t.amount,
       description: t.reason,
       date: t.createdAt,
-      status: t.status === 'pending' ? 'PENDING' : t.status === 'refunded' ? 'REFUNDED' : undefined
+      status: t.status === 'pending' ? 'PENDING' : t.status === 'refunded' ? 'REFUNDED' : t.status === 'completed' ? 'APPROVED' : undefined
     }));
 
     // Calculate withdrawable balance

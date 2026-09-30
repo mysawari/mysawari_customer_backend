@@ -11,6 +11,7 @@ const customerController = new CustomerController();
 
 router.get('/profile', protect, customerController.getProfile.bind(customerController));
 router.put('/profile', protect, profileWriteLimiter, customerController.updateProfile.bind(customerController));
+router.put('/location', protect, customerController.updateLocation.bind(customerController));
 router.delete('/profile', protect, accountDeleteLimiter, customerController.deleteProfile.bind(customerController));
 
 module.exports = router;

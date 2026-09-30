@@ -42,6 +42,11 @@ const extendBookingSchema = new mongoose.Schema(
       enum: ['pending', 'approved', 'rejected'],
       default: 'pending',
     },
+    reason: {
+      type: String,
+      required: true,
+      default: "No reason provided",
+    },
   },
   { timestamps: true }
 );
