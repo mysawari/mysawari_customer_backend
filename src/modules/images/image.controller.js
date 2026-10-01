@@ -137,6 +137,16 @@ exports.getBlurredImage = async (req, res) => {
         console.error('IMAGE_PROCESSING_API_URL is not set — vehicle photos cannot be shown without plate processing.');
         return fail(res, 503, 'Image processing unavailable');
       }
+
+      // If the microservice is a remote cloud instance, it cannot reach localhost/127.0.0.1/192.168.x.x
+      const isRemoteService = !apiUrl.includes('127.0.0.1') && !apiUrl.includes('localhost');
+      const isLocalTarget = absoluteTargetUrl.includes('127.0.0.1') || absoluteTargetUrl.includes('localhost') || absoluteTargetUrl.includes('10.0.2.2') || absoluteTargetUrl.includes('192.168.');
+      
+      if (isRemoteService && isLocalTarget) {
+        console.warn(`[ImageProxy] Skipping remote processing for local URL: ${absoluteTargetUrl}`);
+        return res.redirect(302, absoluteTargetUrl);
+      }
+
       if (!inFlight.has(hash)) {
         const slot = acquireSlot();
         if (!slot) return fail(res, 503, 'Image processing busy, please retry');
@@ -154,7 +164,7 @@ exports.getBlurredImage = async (req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=86400');
     return res.send(buffer);
   } catch (error) {
-    console.error('Error in image blurring proxy:', error?.message);
+    console.error(`Error in image blurring proxy for ${absoluteTargetUrl}:`, error?.message);
     // Graceful fallback: Redirect directly to the original photo so mobile app never displays broken images
     return res.redirect(302, absoluteTargetUrl);
   }
