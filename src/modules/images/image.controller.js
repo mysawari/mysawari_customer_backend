@@ -155,7 +155,8 @@ exports.getBlurredImage = async (req, res) => {
     return res.send(buffer);
   } catch (error) {
     console.error('Error in image blurring proxy:', error?.message);
-    return fail(res, 503, 'Image processing failed');
+    // Graceful fallback: Redirect directly to the original photo so mobile app never displays broken images
+    return res.redirect(302, absoluteTargetUrl);
   }
 };
 
