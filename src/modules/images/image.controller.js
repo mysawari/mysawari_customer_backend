@@ -143,19 +143,41 @@ exports.getBlurredImage = async (req, res) => {
       const isLocalTarget = absoluteTargetUrl.includes('127.0.0.1') || absoluteTargetUrl.includes('localhost') || absoluteTargetUrl.includes('10.0.2.2') || absoluteTargetUrl.includes('192.168.');
       
       if (isRemoteService && isLocalTarget) {
-        console.warn(`[ImageProxy] Skipping remote processing for local URL: ${absoluteTargetUrl}`);
-        return res.redirect(302, absoluteTargetUrl);
-      }
-
-      if (!inFlight.has(hash)) {
-        const slot = acquireSlot();
-        if (!slot) return fail(res, 503, 'Image processing busy, please retry');
-        inFlight.set(
-          hash,
-          slot
-            .then(() => processImage(apiUrl, absoluteTargetUrl, cachedFilePath).finally(releaseSlot))
-            .finally(() => inFlight.delete(hash))
-        );
+        if (!inFlight.has(hash)) {
+          const slot = acquireSlot();
+          if (!slot) return fail(res, 503, 'Image processing busy, please retry');
+          inFlight.set(
+            hash,
+            slot
+              .then(async () => {
+                // Fetch the image from the local server itself, convert to base64, send to remote microservice
+                try {
+                  const imageRes = await axios.get(absoluteTargetUrl, { responseType: 'arraybuffer', timeout: 5000 });
+                  const base64 = Buffer.from(imageRes.data, 'binary').toString('base64');
+                  const mimeType = imageRes.headers['content-type'] || 'image/jpeg';
+                  const base64Payload = `data:${mimeType};base64,${base64}`;
+                  await processImage(apiUrl, base64Payload, cachedFilePath);
+                } catch (err) {
+                  throw err;
+                }
+              })
+              .finally(() => {
+                releaseSlot();
+                inFlight.delete(hash);
+              })
+          );
+        }
+      } else {
+        if (!inFlight.has(hash)) {
+          const slot = acquireSlot();
+          if (!slot) return fail(res, 503, 'Image processing busy, please retry');
+          inFlight.set(
+            hash,
+            slot
+              .then(() => processImage(apiUrl, absoluteTargetUrl, cachedFilePath).finally(releaseSlot))
+              .finally(() => inFlight.delete(hash))
+          );
+        }
       }
       buffer = await inFlight.get(hash);
     }
