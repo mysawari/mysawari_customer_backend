@@ -130,29 +130,37 @@ class NotificationService {
 
     await notification.save();
 
-    // Trigger Expo push
-    let tokens = [];
+    // Fetch customer details if targeting a specific customer
     let customerPhone = null;
-
-    if (target === 'all') {
-      const devices = await CustomerDevice.find({}, 'expoPushToken');
-      tokens = devices.map(d => d.expoPushToken);
-    } else if (customerId) {
-      const devices = await CustomerDevice.find({ customerId }, 'expoPushToken');
-      tokens = devices.map(d => d.expoPushToken);
-      
-      // Fetch customer phone number for potential WATI message
-      if (payload && payload.watiTemplate) {
-        const customer = await Customer.findById(customerId);
-        if (customer && customer.mobileNumber) {
-          customerPhone = customer.mobileNumber;
-        }
+    if (customerId) {
+      const customer = await Customer.findById(customerId);
+      if (customer && customer.mobileNumber) {
+        customerPhone = customer.mobileNumber;
       }
     }
 
-    if (tokens.length > 0) {
-      // Chunking for Expo API limit (100 per request) is best practice, but kept simple here
-      this._sendExpoPushNotification(tokens, title, body, payload);
+    // Trigger Firebase Cloud Function for FCM Push Notifications
+    const FIREBASE_URL = process.env.FIREBASE_FUNCTIONS_URL || 'https://us-central1-mysawari-customer-app.cloudfunctions.net';
+    
+    try {
+      if (target === 'all') {
+        // Send to all customers via FCM topic
+        await axios.post(`${FIREBASE_URL}/sendToAllCustomers`, {
+          title,
+          body,
+          data: payload || {}
+        }).catch(err => console.error("Firebase broadcast failed:", err.message));
+      } else if (target === 'specific' && customerPhone) {
+        // Send to specific customer via FCM topic (customer_<mobile>)
+        await axios.post(`${FIREBASE_URL}/sendToSpecificCustomer`, {
+          mobile: customerPhone,
+          title,
+          body,
+          data: payload || {}
+        }).catch(err => console.error("Firebase specific notification failed:", err.message));
+      }
+    } catch (error) {
+      console.error('Error triggering Firebase notification function:', error.message);
     }
 
     // Trigger WATI message if configured in payload
