@@ -123,7 +123,7 @@ class BookingController {
 
     const bookingsWithExts = bookings.map(b => {
       const exts = extensions.filter(e => e.bookingId.toString() === b._id.toString());
-      return { ...b, extensions: exts };
+      return { ...b, extensions: exts, customerEmail: req.user.email };
     });
 
     // Cancellation outcome is derived from the policy (no extra DB fields needed).
