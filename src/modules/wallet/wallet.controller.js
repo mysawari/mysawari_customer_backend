@@ -87,6 +87,7 @@ class WalletController {
 
     const txRecords = await SawariCashTransaction.find({ customerId: userId })
       .sort({ createdAt: -1 })
+      .limit(2000)
       .lean();
 
     // Reload customer to get the potentially updated balance
@@ -156,7 +157,7 @@ class WalletController {
 
     // Calculate maximum withdrawable balance from transaction history
     const SawariCashTransaction = require('../../models/sawaricash_transaction.model');
-    const txRecords = await SawariCashTransaction.find({ customerId: req.user._id }).lean();
+    const txRecords = await SawariCashTransaction.find({ customerId: req.user._id }).sort({ createdAt: -1 }).limit(2000).lean();
     
     const referralCredits = txRecords
       .filter(t => t.transactionType === 'credit' && t.reason?.toLowerCase().includes('referral commission'))
