@@ -5,7 +5,7 @@ class WatiService {
   constructor() {
     this.apiUrl = process.env.WATI_API_URL || 'https://live-mt-server.wati.io';
     this.accessToken = process.env.WATI_ACCESS_TOKEN || '';
-    this.templateName = process.env.WATI_TEMPLATE_NAME || 'otp_message';
+    this.templateName = process.env.WATI_TEMPLATE_NAME || 'mysawari_otp_message';
     this.tenantId = process.env.WATI_TENANT_ID || '';
   }
 
@@ -64,7 +64,8 @@ class WatiService {
 
       if (!response.ok || data.result === false) {
         console.error('❌ WATI API Rejection details:', responseText);
-        throw new AppError(data.info || data.message || data.error || 'WATI API rejected the request', response.status || 500);
+        const errorDetail = (data.items && data.items[0] && data.items[0].description) || data.info || data.message || data.error || 'WATI API rejected the request';
+        throw new AppError(errorDetail, response.status || 500);
       }
 
       console.log(`💬 WhatsApp OTP sent to +${finalMobile} via WATI`);
