@@ -141,7 +141,7 @@ function bookingFields(body, amounts, { paidStatus }) {
       fastagAmount: 0,
       securityDeposit: 0,
       totalAmount: amounts.expectedTotal,
-      discountAmount: amounts.discount,
+      discountAmount: amounts.discount + amounts.subscriptionDiscount,
       bookingAmountPaid: amounts.paidOnline,
       paymentMethod: amounts.paidOnline > 0 ? 'online' : 'wallet',
       balanceAmount: amounts.balanceAmount,
