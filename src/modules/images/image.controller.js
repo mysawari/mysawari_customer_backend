@@ -70,7 +70,8 @@ function resolveTarget(targetUrl) {
   if (path.includes('..') || /%2e|%2f|%5c/i.test(path)) return null;
 
   // Our own uploads (relative "/uploads/..." or any host + "/uploads/..."): only the path is used.
-  if (path.startsWith('/uploads/') && /^\/uploads\/[\w.\-/]+$/.test(path)) {
+  const decodedPath = decodeURIComponent(path);
+  if (decodedPath.startsWith('/uploads/') && /^\/uploads\/[\w.\-\/ ()]+$/.test(decodedPath)) {
     return `${SELF_BASE_URL}${path}`;
   }
 
