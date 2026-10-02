@@ -139,28 +139,24 @@ class NotificationService {
       }
     }
 
-    // Trigger Firebase Cloud Function for FCM Push Notifications
+    // Trigger Firebase Cloud Function for FCM Push Notifications (fire-and-forget)
     const FIREBASE_URL = process.env.FIREBASE_FUNCTIONS_URL || 'https://us-central1-mysawari-customer-app.cloudfunctions.net';
     
-    try {
-      if (target === 'all') {
-        // Send to all customers via FCM topic
-        await axios.post(`${FIREBASE_URL}/sendToAllCustomers`, {
-          title,
-          body,
-          data: payload || {}
-        }).catch(err => console.error("Firebase broadcast failed:", err.message));
-      } else if (target === 'specific' && customerPhone) {
-        // Send to specific customer via FCM topic (customer_<mobile>)
-        await axios.post(`${FIREBASE_URL}/sendToSpecificCustomer`, {
-          mobile: customerPhone,
-          title,
-          body,
-          data: payload || {}
-        }).catch(err => console.error("Firebase specific notification failed:", err.message));
-      }
-    } catch (error) {
-      console.error('Error triggering Firebase notification function:', error.message);
+    if (target === 'all') {
+      // Send to all customers via FCM topic
+      axios.post(`${FIREBASE_URL}/sendToAllCustomers`, {
+        title,
+        body,
+        data: payload || {}
+      }).catch(err => console.error("Firebase broadcast failed:", err.message));
+    } else if (target === 'specific' && customerPhone) {
+      // Send to specific customer via FCM topic (customer_<mobile>)
+      axios.post(`${FIREBASE_URL}/sendToSpecificCustomer`, {
+        mobile: customerPhone,
+        title,
+        body,
+        data: payload || {}
+      }).catch(err => console.error("Firebase specific notification failed:", err.message));
     }
 
     // Trigger WATI message if configured in payload

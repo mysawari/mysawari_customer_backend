@@ -92,23 +92,19 @@ class AuthService {
       { upsert: true, new: true }
     );
     
-    try {
-      // Call WATI API to send WhatsApp message
-      await watiService.sendWhatsAppOtp(mobileNumber, otp);
+    // Fire-and-forget: dispatch the WhatsApp message in the background so the
+    // API responds to the customer instantly instead of waiting 2-5 s for WATI.
+    // The OTP is already persisted above, so even if WATI is slow the user can
+    // verify as soon as the message arrives.
+    watiService.sendWhatsAppOtp(mobileNumber, otp).catch((error) => {
+      console.error(`❌ Background WhatsApp OTP delivery failed for ${mobileNumber}:`, error.message);
+    });
 
-      // Never log the OTP itself in production.
-      console.log(`💬 WhatsApp OTP Request Queued: ${mobileNumber}`);
-      if (secrets.isDevelopment) {
-        console.log(`🔒 Developer Override Code: ${otp}`);
-      }
-      
-      const isExistingUser = await Customer.exists({ mobileNumber });
-      return { isExistingUser: !!isExistingUser };
-    } catch (error) {
-      // If sending fails, rollback the OTP from database so the user isn't stuck
-      await Otp.deleteOne({ mobileNumber });
-      throw error;
-    }
+    // Log only that a request was queued, never the OTP value itself.
+    console.log(`💬 WhatsApp OTP Request Queued: ${mobileNumber}`);
+    
+    const isExistingUser = await Customer.exists({ mobileNumber });
+    return { isExistingUser: !!isExistingUser };
   }
 
   async verifyOtp({ mobileNumber, otp, customerName, referredByCode, deviceInfo = 'Unknown', ipAddress = '', installId = '' }) {

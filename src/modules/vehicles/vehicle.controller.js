@@ -82,9 +82,18 @@ function applyDynamicImageProxy(req, payload) {
     data: payload.data.map(vehicle => {
       const proxyImages = (vehicle.images || []).map(img => {
         if (!img.url) return img;
+        
+        let optimizedUrl = img.url;
+        if (optimizedUrl.includes('res.cloudinary.com') && optimizedUrl.includes('/upload/')) {
+          if (!optimizedUrl.includes('q_auto') && !optimizedUrl.includes('w_')) {
+            optimizedUrl = optimizedUrl.replace('/upload/', '/upload/q_auto,f_auto,w_800,c_limit/');
+          }
+        }
+        
+        // Serve the image through the blur proxy, but with the optimized Cloudinary URL to keep it fast
         return {
           ...img,
-          url: `${baseUrl}/api/images/blur?target=${encodeURIComponent(img.url)}`
+          url: `${baseUrl}/api/images/blur?target=${encodeURIComponent(optimizedUrl)}`
         };
       });
       return { ...vehicle, images: proxyImages };

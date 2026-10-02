@@ -875,31 +875,29 @@ class BookingController {
       );
     }
 
-    // 6) Send Notifications
-    try {
-      const notificationService = require('../notifications/notification.service');
-      await notificationService.createNotification({
-        target: 'specific',
-        customerId: req.user._id,
-        title: 'Booking Confirmed! 🎉',
-        body: `Your booking for ${confirmed.vehicleName} is confirmed.`,
-        payload: {
-          watiTemplate: process.env.WATI_BOOKING_TEMPLATE || 'booking_confirmation_message',
-          watiParams: [
-            { name: "name", value: req.user.customerName || 'Customer' },
-            { name: "vehicle", value: confirmed.vehicleName }
-          ]
-        }
-      });
-    } catch (err) {
-      console.error('Failed to send booking confirmation notification:', err.message);
-    }
+    // 6) Send Notifications — fire-and-forget so the checkout response is instant.
+    // The notification, Firebase push, and WATI WhatsApp message all happen in
+    // the background. The customer sees "Booking Confirmed" immediately.
+    const notificationService = require('../notifications/notification.service');
+    notificationService.createNotification({
+      target: 'specific',
+      customerId: req.user._id,
+      title: 'Booking Confirmed! 🎉',
+      body: `Your booking for ${confirmed.vehicleName} is confirmed.`,
+      payload: {
+        watiTemplate: process.env.WATI_BOOKING_TEMPLATE || 'booking_confirmation_message',
+        watiParams: [
+          { name: "name", value: req.user.customerName || 'Customer' },
+          { name: "vehicle", value: confirmed.vehicleName }
+        ]
+      }
+    }).catch(err => console.error('Failed to send booking confirmation notification:', err.message));
 
-    // Mark any abandoned lead for this user as recovered
-    await CustomerAppLead.updateOne(
+    // Mark any abandoned lead for this user as recovered (non-blocking)
+    CustomerAppLead.updateOne(
       { mobileNumber: req.user.mobileNumber, status: 'abandoned' },
       { $set: { status: 'recovered' } }
-    );
+    ).catch(() => {});
 
     invalidateVehicleCache(); // availability just changed for sure
     return ApiResponse.success(res, confirmed, 'Booking confirmed', 200);
