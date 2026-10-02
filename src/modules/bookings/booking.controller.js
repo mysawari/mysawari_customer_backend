@@ -121,9 +121,28 @@ class BookingController {
     const bookingIds = bookings.map(b => b._id);
     const extensions = await ExtendBooking.find({ bookingId: { $in: bookingIds } }).lean();
 
+    // Fetch handovers because the Operations app updates financial figures inside the handover
+    // document rather than on the original Booking document when the car is taken.
+    const handovers = await mongoose.connection.db.collection('handovers').find(
+      { bookingId: { $in: bookingIds }, isDeleted: { $ne: true } },
+      { projection: { bookingId: 1, payment: 1 } }
+    ).toArray();
+
     const bookingsWithExts = bookings.map(b => {
       const exts = extensions.filter(e => e.bookingId.toString() === b._id.toString());
-      return { ...b, extensions: exts, customerEmail: req.user.email };
+      const bookingHandover = handovers.find(h => h.bookingId && h.bookingId.toString() === b._id.toString());
+      
+      let p = { ...(b.payment || {}) };
+      if (bookingHandover && bookingHandover.payment) {
+        // Sync the accurate financials from the operations app's handover state
+        const hp = bookingHandover.payment;
+        const hb = hp.billSummary || {};
+        p.totalAmount = hb.totalAmount ?? hp.totalAmount ?? p.totalAmount;
+        p.balanceAmount = hb.balanceAmount ?? hp.balanceAmount ?? p.balanceAmount;
+        p.totalCollected = hb.totalCollected ?? hp.totalCollected ?? p.totalCollected ?? ((hp.bookingAmountPaid || 0) + (hp.amountReceivedNow || 0));
+      }
+
+      return { ...b, payment: p, extensions: exts, customerEmail: req.user.email };
     });
 
     // Cancellation outcome is derived from the policy (no extra DB fields needed).
