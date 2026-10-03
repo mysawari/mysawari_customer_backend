@@ -69,10 +69,17 @@ function resolveTarget(targetUrl) {
   const path = parsed.pathname;
   if (path.includes('..') || /%2e|%2f|%5c/i.test(path)) return null;
 
-  // Our own uploads (relative "/uploads/..." or any host + "/uploads/..."): only the path is used.
   const decodedPath = decodeURIComponent(path);
-  if (decodedPath.startsWith('/uploads/') && /^\/uploads\/[\w.\-\/ ()]+$/.test(decodedPath)) {
+  const isUploadsPath = decodedPath.startsWith('/uploads/') && /^\/uploads\/[\w.\-\/ ()]+$/.test(decodedPath);
+
+  // If it's a relative /uploads/ path (no real host), rewrite to our own server
+  if (isUploadsPath && parsed.hostname === 'placeholder.invalid') {
     return `${SELF_BASE_URL}${path}`;
+  }
+
+  // If it's a full URL with /uploads/ from an allowed or known host, keep the original URL as-is
+  if (isUploadsPath && parsed.protocol === 'https:' && !parsed.username && !parsed.password) {
+    return parsed.toString();
   }
 
   // External photos: https only, allowed hosts only, image-delivery paths only.
