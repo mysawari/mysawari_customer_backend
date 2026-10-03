@@ -188,8 +188,22 @@ exports.getBlurredImage = async (req, res) => {
     return res.send(buffer);
   } catch (error) {
     console.error(`Error in image blurring proxy for ${absoluteTargetUrl}:`, error?.message);
-    // Graceful fallback: Redirect directly to the original photo so mobile app never displays broken images
-    return res.redirect(302, absoluteTargetUrl);
+    // Graceful fallback: try to serve the original image directly so the app never shows broken images.
+    try {
+      const fallbackRes = await axios.get(absoluteTargetUrl, {
+        responseType: 'arraybuffer',
+        timeout: 10000,
+        maxContentLength: 15 * 1024 * 1024,
+        maxRedirects: 2,
+      });
+      const contentType = fallbackRes.headers['content-type'] || 'image/jpeg';
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'public, max-age=3600'); // shorter cache for unprocessed fallback
+      return res.send(Buffer.from(fallbackRes.data));
+    } catch (fallbackErr) {
+      // If even the original image is unreachable, redirect as last resort
+      return res.redirect(302, absoluteTargetUrl);
+    }
   }
 };
 
