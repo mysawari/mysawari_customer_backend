@@ -77,7 +77,7 @@ function resolveTarget(targetUrl) {
   if (isUploadsPath && parsed.hostname === 'placeholder.invalid') {
     // Vehicle images are stored on the Operation App backend, not the Customer Backend
     if (isVehicleUpload) {
-      const OPERATION_BACKEND_URL = 'https://mysawari-operation-backend.onrender.com';
+      const OPERATION_BACKEND_URL = (process.env.OPERATION_BACKEND_URL || 'https://mysawari-operation-backend.onrender.com').replace(/\/+$/, '');
       return `${OPERATION_BACKEND_URL}${path}`;
     }
     // Other uploads (if any) route to the customer backend itself
