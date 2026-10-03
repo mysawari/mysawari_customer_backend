@@ -147,7 +147,10 @@ exports.getBlurredImage = async (req, res) => {
     if (fs.existsSync(cachedFilePath)) {
       buffer = await fs.promises.readFile(cachedFilePath);
     } else {
-      const apiUrl = process.env.IMAGE_PROCESSING_API_URL || 'https://mysawari-image-service.onrender.com/process';
+      let apiUrl = process.env.IMAGE_PROCESSING_API_URL || 'https://mysawari-image-service.onrender.com/process';
+      if (!apiUrl.endsWith('/process') && !apiUrl.endsWith('/process/')) {
+        apiUrl = apiUrl.replace(/\/+$/, '') + '/process';
+      }
       if (!apiUrl) {
         console.error('IMAGE_PROCESSING_API_URL is not set — vehicle photos cannot be shown without plate processing.');
         return fail(res, 503, 'Image processing unavailable');
