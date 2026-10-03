@@ -410,7 +410,7 @@ class BookingController {
     // Fetch the active handover if any exists for this booking/vehicle
     const activeHandover = await mongoose.connection.db.collection('handovers').findOne({
       "customer.mobileNumber": req.user.mobileNumber,
-      "vehicle.vehicleId": booking.vehicleId.toString(),
+      "vehicle.vehicleId": booking.vehicleId, // Removed .toString() to correctly match MongoDB ObjectId
       handoverStatus: { $nin: ['returned', 'completed', 'cancelled'] },
       isDeleted: { $ne: true }
     });
