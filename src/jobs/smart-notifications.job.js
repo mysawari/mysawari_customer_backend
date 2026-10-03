@@ -50,20 +50,35 @@ const sendSmartNotifications = async () => {
       }
     }
 
-    // 3. Handover completed (returned)
-    // Query the handovers collection directly (since it's a shared DB)
+    // 3. Handover Actions (Trip Started & Trip Completed)
     const handovers = mongoose.connection.db.collection('handovers');
-    const returnedHandovers = await handovers.find({ handoverStatus: 'returned', updatedAt: { $gte: fifteenMinutesAgo, $lte: now } }).toArray();
     
+    // a. Trip Started (Handover Completed to Customer)
+    const activeHandovers = await handovers.find({ handoverStatus: 'active', createdAt: { $gte: fifteenMinutesAgo, $lte: now } }).toArray();
+    for (const handover of activeHandovers) {
+      const booking = await Booking.findById(handover.bookingId);
+      if (booking) {
+        const recentNotif = await CustomerActivity.findOne({ action: 'sent_started_notif', details: { handoverId: handover._id } });
+        if (!recentNotif) {
+          await notificationService.createNotification({
+            target: 'specific', customerId: booking.customerId,
+            title: 'Trip Started! 🚗', body: `Your vehicle ${booking.vehicleName} has been successfully handed over to you. Have a safe trip!`
+          });
+          await CustomerActivity.create({ action: 'sent_started_notif', customerId: booking.customerId, details: { handoverId: handover._id } });
+        }
+      }
+    }
+
+    // b. Trip Completed (Car Returned)
+    const returnedHandovers = await handovers.find({ handoverStatus: 'returned', updatedAt: { $gte: fifteenMinutesAgo, $lte: now } }).toArray();
     for (const handover of returnedHandovers) {
-      // customerId is not perfectly mapped in handover, but bookingId is.
       const booking = await Booking.findById(handover.bookingId);
       if (booking) {
         const recentNotif = await CustomerActivity.findOne({ action: 'sent_returned_notif', details: { handoverId: handover._id } });
         if (!recentNotif) {
           await notificationService.createNotification({
             target: 'specific', customerId: booking.customerId,
-            title: 'Trip Completed', body: 'Thank you for riding with MySawari! Please leave a review.'
+            title: 'Trip Completed ✅', body: 'Thank you for riding with MySawari! We hope you enjoyed the trip. Please leave a review.'
           });
           await CustomerActivity.create({ action: 'sent_returned_notif', customerId: booking.customerId, details: { handoverId: handover._id } });
         }
