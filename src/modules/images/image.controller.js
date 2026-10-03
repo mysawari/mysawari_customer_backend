@@ -71,9 +71,16 @@ function resolveTarget(targetUrl) {
 
   const decodedPath = decodeURIComponent(path);
   const isUploadsPath = decodedPath.startsWith('/uploads/') && /^\/uploads\/[\w.\-\/ ()]+$/.test(decodedPath);
+  const isVehicleUpload = decodedPath.startsWith('/uploads/vehicles/');
 
-  // If it's a relative /uploads/ path (no real host), rewrite to our own server
+  // If it's a relative /uploads/ path (no real host)
   if (isUploadsPath && parsed.hostname === 'placeholder.invalid') {
+    // Vehicle images are stored on the Operation App backend, not the Customer Backend
+    if (isVehicleUpload) {
+      const OPERATION_BACKEND_URL = 'https://mysawari-operation-backend.onrender.com';
+      return `${OPERATION_BACKEND_URL}${path}`;
+    }
+    // Other uploads (if any) route to the customer backend itself
     return `${SELF_BASE_URL}${path}`;
   }
 
