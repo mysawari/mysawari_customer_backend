@@ -42,18 +42,20 @@ class NotificationService {
    * Includes both 'all' target and 'specific' target notifications
    */
   async getNotifications(customerId) {
-    const notifications = await Notification.find({
-      $or: [
-        { target: 'all' },
-        { customerId: customerId }
-      ]
-    }).sort({ createdAt: -1 }).limit(50);
+    // Build query: guests only see broadcasts, logged-in users see broadcasts + their specific ones
+    const query = customerId
+      ? { $or: [{ target: 'all' }, { customerId: customerId }] }
+      : { target: 'all' };
+
+    const notifications = await Notification.find(query).sort({ createdAt: -1 }).limit(50);
     
     // Map them to include dynamic isRead based on the readBy array for 'all'
     return notifications.map(notif => {
       const n = notif.toJSON();
-      if (n.target === 'all') {
+      if (n.target === 'all' && customerId) {
         n.isRead = notif.readBy.some((id) => String(id) === String(customerId));
+      } else if (n.target === 'all') {
+        n.isRead = false; // Guests always see broadcasts as unread
       }
       delete n.readBy; // the list of every customer who read a broadcast is not for customers
       return n;

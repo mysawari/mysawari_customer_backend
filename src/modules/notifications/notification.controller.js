@@ -7,7 +7,8 @@ const mongoose = require('mongoose');
 class NotificationController {
   // GET /api/notifications
   getNotifications = asyncHandler(async (req, res) => {
-    const customerId = req.user._id;
+    // protectOptional may leave req.user undefined for guests — handle gracefully
+    const customerId = req.user ? req.user._id : null;
     const notifications = await notificationService.getNotifications(customerId);
     return ApiResponse.success(res, notifications, 'Notifications fetched');
   });
