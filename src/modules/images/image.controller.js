@@ -143,66 +143,18 @@ exports.getBlurredImage = async (req, res) => {
   const cachedFilePath = path.join(CACHE_DIR, `${hash}.jpeg`);
 
   try {
-    let buffer;
-    if (fs.existsSync(cachedFilePath)) {
-      buffer = await fs.promises.readFile(cachedFilePath);
-    } else {
-      let apiUrl = process.env.IMAGE_PROCESSING_API_URL || 'https://mysawari-image-service.onrender.com/process';
-      if (!apiUrl.endsWith('/process') && !apiUrl.endsWith('/process/')) {
-        apiUrl = apiUrl.replace(/\/+$/, '') + '/process';
-      }
-      if (!apiUrl) {
-        console.error('IMAGE_PROCESSING_API_URL is not set — vehicle photos cannot be shown without plate processing.');
-        return fail(res, 503, 'Image processing unavailable');
-      }
-
-      // If the microservice is a remote cloud instance, it cannot reach localhost/127.0.0.1/192.168.x.x
-      const isRemoteService = !apiUrl.includes('127.0.0.1') && !apiUrl.includes('localhost');
-      const isLocalTarget = absoluteTargetUrl.includes('127.0.0.1') || absoluteTargetUrl.includes('localhost') || absoluteTargetUrl.includes('10.0.2.2') || absoluteTargetUrl.includes('192.168.');
-      
-      if (isRemoteService && isLocalTarget) {
-        if (!inFlight.has(hash)) {
-          const slot = acquireSlot();
-          if (!slot) return fail(res, 503, 'Image processing busy, please retry');
-          inFlight.set(
-            hash,
-            slot
-              .then(async () => {
-                // Fetch the image from the local server itself, convert to base64, send to remote microservice
-                try {
-                  const imageRes = await axios.get(absoluteTargetUrl, { responseType: 'arraybuffer', timeout: 5000 });
-                  const base64 = Buffer.from(imageRes.data, 'binary').toString('base64');
-                  const mimeType = imageRes.headers['content-type'] || 'image/jpeg';
-                  const base64Payload = `data:${mimeType};base64,${base64}`;
-                  await processImage(apiUrl, base64Payload, cachedFilePath);
-                } catch (err) {
-                  throw err;
-                }
-              })
-              .finally(() => {
-                releaseSlot();
-                inFlight.delete(hash);
-              })
-          );
-        }
-      } else {
-        if (!inFlight.has(hash)) {
-          const slot = acquireSlot();
-          if (!slot) return fail(res, 503, 'Image processing busy, please retry');
-          inFlight.set(
-            hash,
-            slot
-              .then(() => processImage(apiUrl, absoluteTargetUrl, cachedFilePath).finally(releaseSlot))
-              .finally(() => inFlight.delete(hash))
-          );
-        }
-      }
-      buffer = await inFlight.get(hash);
-    }
-
-    res.setHeader('Content-Type', 'image/jpeg');
+    // FAST PATH: Directly fetch the image without sending it to the Python microservice for blurring
+    const imageRes = await axios.get(absoluteTargetUrl, {
+      responseType: 'arraybuffer',
+      timeout: 10000,
+      maxContentLength: 15 * 1024 * 1024,
+      maxRedirects: 2,
+    });
+    
+    const contentType = imageRes.headers['content-type'] || 'image/jpeg';
+    res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'public, max-age=86400');
-    return res.send(buffer);
+    return res.send(Buffer.from(imageRes.data));
   } catch (error) {
     console.error(`Error in image blurring proxy for ${absoluteTargetUrl}:`, error?.message);
     // Graceful fallback: try to serve the original image directly so the app never shows broken images.
