@@ -6,10 +6,12 @@ const app = require('./app');
 const PORT = process.env.PORT || 5001;
 
 const { startLeadJobs } = require('./jobs/lead-reminder.job');
+const { startSmartNotificationJobs } = require('./jobs/smart-notifications.job');
 
 const server = app.listen(PORT, '0.0.0.0', async () => {
   await connectDB();
   startLeadJobs();
+  startSmartNotificationJobs();
   console.log(`================================`);
   console.log(`🚀 JS Server running on port ${PORT} (0.0.0.0)`);
   console.log(`================================`);
