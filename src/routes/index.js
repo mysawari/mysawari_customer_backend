@@ -22,5 +22,6 @@ router.use('/offers', require('../modules/coupons/coupon.routes'));
 router.use('/notifications', require('../modules/notifications/notification.routes'));
 router.use('/images', require('../modules/images/image.routes'));
 router.use('/refunds', require('./refund.routes'));
+router.use('/activity', require('../modules/customers/activity.routes'));
 
 module.exports = router;
