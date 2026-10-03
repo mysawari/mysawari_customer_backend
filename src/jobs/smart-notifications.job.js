@@ -37,6 +37,46 @@ const sendSmartNotifications = async () => {
       }
     }
 
+    // 1.5. Marketing (Offers & Destinations tracking)
+    const marketingActivities = await CustomerActivity.aggregate([
+      { $match: { 
+          action: { $in: ['view_offer', 'view_special_deal', 'view_destination'] }, 
+          createdAt: { $gte: thirtyMinutesAgo, $lte: fifteenMinutesAgo }, 
+          customerId: { $ne: null } 
+      }},
+      { $sort: { createdAt: -1 } },
+      { $group: { _id: '$customerId', lastActivity: { $first: '$$ROOT' } } }
+    ]);
+
+    for (const group of marketingActivities) {
+      const act = group.lastActivity;
+      const recentBooking = await Booking.findOne({ customerId: act.customerId, createdAt: { $gte: thirtyMinutesAgo } });
+      if (!recentBooking) {
+        // Send max 1 marketing notif per day
+        const recentNotif = await CustomerActivity.findOne({ action: 'sent_marketing_notif', customerId: act.customerId, createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } });
+        if (!recentNotif) {
+          let title = 'Plan your next trip!';
+          let body = 'We have some great vehicles waiting for you.';
+          
+          if (act.action === 'view_offer') {
+            title = 'Don’t forget your discount! 🎁';
+            body = `Use code ${act.details?.offerCode} to get a discount on your next ride.`;
+          } else if (act.action === 'view_destination') {
+            title = `Planning a trip to ${act.details?.destination}? 🏔️`;
+            body = `Book a comfortable ride with MySawari and make your trip to ${act.details?.destination} unforgettable!`;
+          } else if (act.action === 'view_special_deal') {
+            title = 'Special Deal just for you! 🌟';
+            body = `Book the ${act.details?.dealTitle} before the offer expires!`;
+          }
+
+          await notificationService.createNotification({
+            target: 'specific', customerId: act.customerId, title, body
+          });
+          await CustomerActivity.create({ action: 'sent_marketing_notif', customerId: act.customerId });
+        }
+      }
+    }
+
     // 2. Cancelled Bookings
     const cancelledBookings = await Booking.find({ bookingStatus: 'cancelled', updatedAt: { $gte: fifteenMinutesAgo, $lte: now } });
     for (const booking of cancelledBookings) {
