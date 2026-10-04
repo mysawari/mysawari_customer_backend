@@ -13,8 +13,9 @@ const { detect, iou, loadSessions } = require('./yolo');
  *  - upright / vehicle passes: confident hits (>= 0.5);
  *  - turned passes: only very confident hits (>= 0.65) — a round headlamp grille or a sticker reaches ~0.55
  *    there, real plates score 0.65-0.85;
- *  - weaker upright hits only when the spot really holds characters on a plate background (white, yellow, or
- *    the black-and-yellow of rental plates) AND the hit is fairly likely (0.3-0.5, typically a small plate in a
+ *  - weaker upright hits only when they are big enough to be readable (>= 40 px wide), the spot really holds
+ *    characters on a plate (two clearly contrasting tones, whatever the plate colour — white, yellow, black
+ *    rental, green EV, red, blue...), and the hit is fairly likely (0.3-0.5, typically a small plate in a
  *    low-resolution photo) or a second pass agrees on it.
  * Everything else (empty plate holders, lamps, decals, badges) is left alone.
  */
@@ -24,6 +25,7 @@ const MIN_CONF = 0.2;
 const WEAK_CONF = 0.3;
 const SURE_CONF = 0.5;
 const ROTATED_SURE_CONF = 0.65;
+const MIN_WEAK_WIDTH = 40;
 const AGREE_IOU = 0.3;
 const VEHICLE_CONF = 0.3;
 const VEHICLE_CLASSES = [2, 3, 5, 7]; // COCO: car, motorcycle, bus, truck
@@ -112,38 +114,48 @@ function looksLikePlate(image, region) {
 }
 
 /**
- * Does the spot hold characters on a number-plate background? Counts plate-background pixels (white / cream, or yellow / orange)
- * and dark pixels (the characters — or, on a black rental plate, the background with yellow characters).
+ * Does the spot hold characters on a plate? Works for every Indian plate type without listing colours —
+ * white / yellow / cream (dark characters), black rental (yellow characters), green EV (white or yellow
+ * characters), red temporary / trade, blue diplomatic, BH series, military: a plate is two clearly different
+ * tones, characters on a background. The region's grey levels are split in two (Otsu's method); a plate has
+ * a strong difference between the two groups, and the characters are a minority of the area — not a blank
+ * holder (one tone), not a patch without real contrast.
  */
-function hasPlateColours(image, region) {
+function hasPlateContrast(image, region) {
   const x1 = Math.max(0, Math.floor(region.x1)), y1 = Math.max(0, Math.floor(region.y1));
   const x2 = Math.min(image.width, Math.ceil(region.x2)), y2 = Math.min(image.height, Math.ceil(region.y2));
-  let n = 0, white = 0, yellow = 0, dark = 0;
+  const hist = new Array(256).fill(0);
+  let n = 0;
   for (let y = y1; y < y2; y++) {
     for (let x = x1; x < x2; x++) {
       const p = (y * image.width + x) * 3;
-      const r = image.data[p], g = image.data[p + 1], b = image.data[p + 2];
-      const max = Math.max(r, g, b), min = Math.min(r, g, b);
-      const sat = max ? (max - min) / max : 0;
-      let hue = 0;
-      if (max !== min) {
-        if (max === r) hue = 60 * (((g - b) / (max - min)) % 6);
-        else if (max === g) hue = 60 * ((b - r) / (max - min) + 2);
-        else hue = 60 * ((r - g) / (max - min) + 4);
-        if (hue < 0) hue += 360;
-      }
+      hist[Math.round(0.299 * image.data[p] + 0.587 * image.data[p + 1] + 0.114 * image.data[p + 2])]++;
       n++;
-      // White plates photographed in warm light look cream / peach, so "white" allows some saturation.
-      if (max >= 130 && sat <= 0.4) white++;
-      else if (hue >= 15 && hue <= 70 && sat >= 0.3 && max >= 110) yellow++;
-      if (max <= 90) dark++;
     }
   }
-  if (!n) return false;
-  const light = (white + yellow) / n, darkShare = dark / n, yellowShare = yellow / n;
-  const lightPlate = light >= 0.25 && darkShare >= 0.1 && darkShare <= 0.6; // dark characters on white / yellow
-  const rentalPlate = darkShare >= 0.4 && yellowShare >= 0.05; // yellow characters on black
-  return lightPlate || rentalPlate;
+  if (n < 50) return false;
+
+  // Otsu: the split that best separates the two tones.
+  let total = 0;
+  for (let i = 0; i < 256; i++) total += i * hist[i];
+  let darkCount = 0, darkSum = 0, best = -1, split = 0;
+  for (let t = 0; t < 256; t++) {
+    darkCount += hist[t];
+    darkSum += t * hist[t];
+    const lightCount = n - darkCount;
+    if (!darkCount || !lightCount) continue;
+    const between = darkCount * lightCount * (darkSum / darkCount - (total - darkSum) / lightCount) ** 2;
+    if (between > best) { best = between; split = t; }
+  }
+  let dc = 0, ds = 0;
+  for (let i = 0; i <= split; i++) { dc += hist[i]; ds += i * hist[i]; }
+  const lc = n - dc;
+  if (!dc || !lc) return false;
+  const contrast = (total - ds) / lc - ds / dc;
+  const minority = Math.min(dc, lc) / n;
+  // No upper limit on the minority share: a plate boxed together with its dark frame / a black bike splits
+  // about half and half (measured 0.48-0.49 on a real cream plate).
+  return contrast >= 55 && minority >= 0.06;
 }
 
 /** Every candidate plate as { points (4 corners in the photo), conf, pass }. */
@@ -184,28 +196,54 @@ async function findPlates(image) {
   return found;
 }
 
-/** Share of a box that lies inside the photo (a hit in a turned photo's padding maps to outside it). */
-function insideShare(image, b) {
-  const area = (b.x2 - b.x1) * (b.y2 - b.y1);
-  if (area <= 0) return 0;
-  const w = Math.max(0, Math.min(image.width, b.x2) - Math.max(0, b.x1));
-  const h = Math.max(0, Math.min(image.height, b.y2) - Math.max(0, b.y1));
-  return (w * h) / area;
+/**
+ * Is the box's centre inside the photo? A hit in the grey padding around a turned photo maps to outside it.
+ * (A close-up whose plate fills the photo legitimately spills past the edges once turned back, so it is the
+ * centre that decides, not how much of the box is inside.)
+ */
+function centreInside(image, b) {
+  const cx = (b.x1 + b.x2) / 2, cy = (b.y1 + b.y2) / 2;
+  return cx >= 0 && cy >= 0 && cx <= image.width && cy <= image.height;
 }
 
 /** Applies the rules in the header comment. */
 function selectPlates(image, found) {
   const withBounds = found
     .map((f) => ({ ...f, bounds: boundsOf(f.points) }))
-    .filter((f) => insideShare(image, f.bounds) >= 0.6);
+    .filter((f) => centreInside(image, f.bounds));
   return withBounds.filter((a, i) => {
     if (isRotatedPass(a.pass)) return a.conf >= ROTATED_SURE_CONF;
     if (a.conf >= SURE_CONF) return true;
-    // Weaker hits must hold characters on a plate background, and be either fairly likely or seen twice.
-    if (a.conf < MIN_CONF || !looksLikePlate(image, a.bounds) || !hasPlateColours(image, a.bounds)) return false;
+    // Weaker hits must be big enough to be readable at all (characters of a plate under ~40 px wide are a
+    // few pixels tall — those small hits are badges and decals), hold characters on a plate, and be either
+    // fairly likely or seen twice.
+    if (a.conf < MIN_CONF || a.bounds.x2 - a.bounds.x1 < MIN_WEAK_WIDTH) return false;
+    if (!looksLikePlate(image, a.bounds) || !hasPlateContrast(image, a.bounds)) return false;
     if (a.conf >= WEAK_CONF) return true;
     return withBounds.some((b, j) => j !== i && !isRotatedPass(b.pass) && b.pass !== a.pass && iou(a.bounds, b.bounds) >= AGREE_IOU);
   });
+}
+
+/** Average RGB of each quarter of a region, as a 2x2 RGB image (top-left, top-right, bottom-left, bottom-right). */
+function quarterAverages(image, x1, y1, w, h) {
+  const midX = x1 + Math.floor(w / 2), midY = y1 + Math.floor(h / 2);
+  const sums = new Float64Array(12);
+  const counts = new Float64Array(4);
+  for (let y = y1; y < y1 + h; y++) {
+    for (let x = x1; x < x1 + w; x++) {
+      const q = (y < midY ? 0 : 2) + (x < midX ? 0 : 1);
+      const p = (y * image.width + x) * 3;
+      sums[q * 3] += image.data[p];
+      sums[q * 3 + 1] += image.data[p + 1];
+      sums[q * 3 + 2] += image.data[p + 2];
+      counts[q]++;
+    }
+  }
+  const out = Buffer.alloc(12);
+  for (let q = 0; q < 4; q++) {
+    for (let c = 0; c < 3; c++) out[q * 3 + c] = counts[q] ? Math.round(sums[q * 3 + c] / counts[q]) : 0;
+  }
+  return out;
 }
 
 /**
@@ -222,7 +260,11 @@ async function hidePlate(image, points) {
   const w = x2 - x1, h = y2 - y1;
   if (w < 2 || h < 2) return null;
 
-  const tiny = await cropOf(image, x1, y1, x2, y2).resize(2, 2, { fit: 'fill' }).raw().toBuffer();
+  // Irreversible by construction: the only thing kept from the plate area is the average colour of each of
+  // its four quarters — 12 numbers. Everything drawn over the plate is made from those alone, so the
+  // characters are not hidden in the result, they are gone; no tool (de-blur, sharpening, AI) can bring
+  // back information that is not there.
+  const tiny = quarterAverages(image, x1, y1, w, h);
   const sigma = Math.max(1, Math.min(15, Math.min(w, h) / 4));
   const covered = await sharp(tiny, { raw: { width: 2, height: 2, channels: 3 } })
     .resize(w, h, { fit: 'fill', kernel: 'nearest' })
@@ -270,4 +312,4 @@ function warmUp() {
   return loadSessions();
 }
 
-module.exports = { blurPlates, warmUp, findPlates, selectPlates };
+module.exports = { blurPlates, warmUp, findPlates, selectPlates, hidePlate };

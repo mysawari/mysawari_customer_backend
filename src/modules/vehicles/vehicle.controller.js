@@ -2,6 +2,7 @@ const Vehicle = require('../../models/vehicle.model');
 const Booking = require('../../models/booking.model');
 const { CLOSED_BOOKING_STATUSES } = require('../bookings/booking.constants');
 const { blockingFilter } = require('../bookings/booking.holds');
+const { publicImageUrl } = require('../images/image-token');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -88,17 +89,10 @@ function applyDynamicImageProxy(req, payload) {
   return {
     ...payload,
     data: payload.data.map(vehicle => {
-      const proxyImages = (vehicle.images || []).map(img => {
-        if (!img.url) return img;
-        
-        const optimizedUrl = optimizedImageUrl(img.url);
-
-        // Serve the image through the blur proxy, but with the optimized Cloudinary URL to keep it fast
-        return {
-          ...img,
-          url: `${baseUrl}/api/images/blur?target=${encodeURIComponent(optimizedUrl)}`
-        };
-      });
+      // Only the plate-processed photo, behind an encrypted token: the original address is never sent out.
+      const proxyImages = (vehicle.images || [])
+        .filter((img) => img && img.url)
+        .map((img) => ({ url: publicImageUrl(img.url, baseUrl) }));
       return { ...vehicle, images: proxyImages };
     })
   };

@@ -6,8 +6,11 @@ const cloudinary = require('../../integrations/cloudinary.service');
 const Vehicle = require('../../models/vehicle.model');
 const { RIDE_STATUSES } = require('../bookings/booking.constants');
 
-/** Vehicle photos only ever leave the API through the number-plate blurring endpoint. */
-const plateSafeUrl = (url) => (url ? `/api/images/blur?target=${encodeURIComponent(url)}` : null);
+/**
+ * Vehicle and trip photos only ever leave the API through the number-plate blurring endpoint, behind an
+ * encrypted token (see images/image-token.js) — the original address is never sent out.
+ */
+const { publicImageUrl: plateSafeUrl } = require('../images/image-token');
 
 class ReviewService {
   /**
@@ -159,7 +162,7 @@ class ReviewService {
       date: review.createdAt,
       isVerified: review.isVerified,
       placeVisited: review.placeVisited || null,
-      images: (review.images || []).map((img) => img.url),
+      images: (review.images || []).map((img) => plateSafeUrl(img.url)).filter(Boolean),
     };
   }
 }

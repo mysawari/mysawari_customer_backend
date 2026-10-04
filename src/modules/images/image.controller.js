@@ -3,6 +3,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const os = require('os');
 const { blurPlates } = require('./plate-blur');
+const { decodeImageToken } = require('./image-token');
 
 // Temporary cache directory in the system temp folder to store blurred images
 const CACHE_DIR = path.join(os.tmpdir(), 'mysawari_image_cache');
@@ -12,7 +13,8 @@ if (!fs.existsSync(CACHE_DIR)) {
 
 // Bump when the plate-hiding logic changes, so images processed by an older version are never served again.
 // v6: plates are hidden in-process (plate-blur/), replacing the Python image service.
-const CACHE_VERSION = 'v6';
+// v7: all Indian plate types, irreversible quarter-average cover.
+const CACHE_VERSION = 'v7';
 
 // Only our own photo hosts can be processed. Anything else would let this endpoint fetch arbitrary URLs.
 const ALLOWED_HOSTS = ['res.cloudinary.com', ...(process.env.IMAGE_PROXY_ALLOWED_HOSTS || '').split(',')]
@@ -160,10 +162,31 @@ async function getProcessedImage(absoluteTargetUrl) {
   return inFlight.get(hash);
 }
 
+/**
+ * The photo address a request is for. Normally `t`, the encrypted token the API hands out. Older app
+ * versions wrap whatever URL they were given in `target=` again, so a `target` that is itself one of our
+ * token URLs is unwrapped; a plain `target` address (older clients) is still accepted — it only ever
+ * returns the processed image, and the caller already knows that address.
+ */
+function requestedPhoto(query) {
+  if (typeof query.t === 'string') return decodeImageToken(query.t);
+  const target = query.target;
+  if (typeof target !== 'string' || !target) return null;
+  try {
+    const nested = new URL(target, 'http://placeholder.invalid');
+    if (nested.pathname.endsWith('/api/images/blur') && nested.searchParams.has('t')) {
+      return decodeImageToken(nested.searchParams.get('t'));
+    }
+  } catch {
+    // not a URL — resolveTarget rejects it below
+  }
+  return target;
+}
+
 exports.getBlurredImage = async (req, res) => {
-  const targetUrl = req.query.target;
-  if (!targetUrl || typeof targetUrl !== 'string') {
-    return fail(res, 400, 'Missing target parameter');
+  const targetUrl = requestedPhoto(req.query);
+  if (!targetUrl) {
+    return fail(res, 400, 'Missing or invalid photo');
   }
 
   const absoluteTargetUrl = resolveTarget(targetUrl);

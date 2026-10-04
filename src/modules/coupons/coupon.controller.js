@@ -1,7 +1,19 @@
 const mongoose = require('mongoose');
 const CouponService = require('./coupon.service');
+const { publicImageUrl } = require('../images/image-token');
 
 const OFFER_TYPES = ['coupon', 'special_deal'];
+
+/**
+ * Public form of an offer: its photo (often a fleet vehicle) only through the plate-blurring endpoint, behind
+ * an encrypted token — never the original address or the Cloudinary public id it can be rebuilt from.
+ */
+function publicOffer(offer) {
+  const plain = offer && typeof offer.toObject === 'function' ? offer.toObject() : { ...offer };
+  const raw = typeof plain.image === 'string' ? plain.image : plain.image?.url;
+  plain.image = raw ? { url: publicImageUrl(raw) } : undefined;
+  return plain;
+}
 
 class CouponController {
   /**
@@ -17,7 +29,7 @@ class CouponController {
         return res.status(400).json({ success: false, message: 'Invalid offer type' });
       }
       const offers = await CouponService.getActiveOffers(type || undefined);
-      return res.status(200).json({ success: true, count: offers.length, data: offers });
+      return res.status(200).json({ success: true, count: offers.length, data: offers.map(publicOffer) });
     } catch (error) {
       next(error);
     }
@@ -38,7 +50,7 @@ class CouponController {
       if (!offer || !offer.active || new Date(offer.expiryDate) < new Date()) {
         return res.status(404).json({ success: false, message: 'Offer not found' });
       }
-      return res.status(200).json({ success: true, data: offer });
+      return res.status(200).json({ success: true, data: publicOffer(offer) });
     } catch (error) {
       next(error);
     }
