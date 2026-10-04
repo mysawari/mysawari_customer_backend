@@ -70,6 +70,14 @@ async function buildPayload() {
   return { success: true, count: data.length, generatedAt: new Date().toISOString(), data };
 }
 
+/** Smaller, auto-format Cloudinary rendition (the app never shows photos wider than 800px). */
+function optimizedImageUrl(url) {
+  if (url.includes('res.cloudinary.com') && url.includes('/upload/') && !url.includes('q_auto') && !url.includes('w_')) {
+    return url.replace('/upload/', '/upload/q_auto,f_auto,w_800,c_limit/');
+  }
+  return url;
+}
+
 // Helper to dynamically format image URLs for the current request host
 function applyDynamicImageProxy(req, payload) {
   const protocol = req.protocol || 'http';
@@ -83,13 +91,8 @@ function applyDynamicImageProxy(req, payload) {
       const proxyImages = (vehicle.images || []).map(img => {
         if (!img.url) return img;
         
-        let optimizedUrl = img.url;
-        if (optimizedUrl.includes('res.cloudinary.com') && optimizedUrl.includes('/upload/')) {
-          if (!optimizedUrl.includes('q_auto') && !optimizedUrl.includes('w_')) {
-            optimizedUrl = optimizedUrl.replace('/upload/', '/upload/q_auto,f_auto,w_800,c_limit/');
-          }
-        }
-        
+        const optimizedUrl = optimizedImageUrl(img.url);
+
         // Serve the image through the blur proxy, but with the optimized Cloudinary URL to keep it fast
         return {
           ...img,
@@ -131,3 +134,4 @@ class VehicleController {
 
 module.exports = VehicleController;
 module.exports.invalidateVehicleCache = invalidateVehicleCache;
+module.exports.optimizedImageUrl = optimizedImageUrl;

@@ -12,6 +12,14 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
   await connectDB();
   startLeadJobs();
   startSmartNotificationJobs();
+  // Load the number-plate models now, so the first photo request isn't slow (and a broken model shows up here).
+  require('./modules/images/plate-blur').warmUp()
+    .then(() => {
+      console.log('🔒 Number-plate blur models loaded');
+      // Process all vehicle photos in the background so customers never wait for them (off with PLATE_BLUR_PREWARM=false).
+      if (process.env.PLATE_BLUR_PREWARM !== 'false') require('./modules/images/image.controller').startPrewarm();
+    })
+    .catch((err) => console.error('❌ Number-plate blur models failed to load — vehicle photos cannot be served:', err.message));
   console.log(`================================`);
   console.log(`🚀 JS Server running on port ${PORT} (0.0.0.0)`);
   console.log(`================================`);

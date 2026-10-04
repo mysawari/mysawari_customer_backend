@@ -337,6 +337,19 @@ class BookingController {
     await SawariCashTransaction.deleteMany({ bookingId: booking._id, status: 'pending', transactionType: 'debit' });
 
     invalidateVehicleCache(); // the vehicle is free again
+
+    // Send push notification for cancellation. The claim stops the background job from sending a second one.
+    const NotificationService = require('../notifications/notification.service');
+    NotificationService.claimOnce('sent_cancel_notif', { bookingId: booking._id }, req.user._id)
+      .then((first) => first && NotificationService.createNotification({
+        target: 'specific',
+        customerId: req.user._id,
+        title: "Booking Cancelled",
+        body: `Your booking for ${booking.vehicleName} has been cancelled successfully.`,
+        payload: { bookingId: booking._id }
+      }))
+      .catch(err => console.error("Cancel push notification failed", err));
+
     return ApiResponse.success(res, { ...booking.toObject(), ...outcome }, 'Booking cancelled');
   });
 
@@ -431,18 +444,12 @@ class BookingController {
       status: 'pending' // No changes in other collections, ops app will review this
     });
 
-    // Notify Admins via Firebase Push Notification (using Cloud Function)
-    try {
-      const axios = require('axios');
-      const FIREBASE_URL = process.env.FIREBASE_FUNCTIONS_URL || 'https://us-central1-mysawari-customer-app.cloudfunctions.net';
-      await axios.post(`${FIREBASE_URL}/sendToAdmins`, {
-        title: "Extension Requested",
-        body: `Customer ${req.user.customerName || req.user.mobileNumber} requested an extension of ${quote.additionalDays} days for booking ${booking._id.toString().substring(0, 6)}`,
-        data: { bookingId: booking._id }
-      });
-    } catch (err) {
-      console.log('Firebase Admin Notification Failed:', err.message);
-    }
+    // Notify Admins via Firebase Push Notification (using Cloud Function) — best effort, never blocks the request
+    require('../notifications/notification.service').notifyAdmins(
+      "Extension Requested",
+      `Customer ${req.user.customerName || req.user.mobileNumber} requested an extension of ${quote.additionalDays} days for booking ${booking._id.toString().substring(0, 6)}`,
+      { bookingId: booking._id }
+    );
 
     return ApiResponse.success(res, extensionReq, 'Booking extension request submitted successfully');
   });
@@ -904,6 +911,7 @@ class BookingController {
       title: 'Booking Confirmed! 🎉',
       body: `Your booking for ${confirmed.vehicleName} is confirmed.`,
       payload: {
+        bookingId: confirmed._id,
         watiTemplate: process.env.WATI_BOOKING_TEMPLATE || 'booking_confirmation_message',
         watiParams: [
           { name: "name", value: req.user.customerName || 'Customer' },

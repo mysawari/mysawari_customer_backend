@@ -1,8 +1,71 @@
 const Notification = require('../../models/notification.model');
 const CustomerDevice = require('../../models/customer_device.model');
-const axios = require('axios'); // for Expo Push API
+const CustomerActivity = require('../../models/customer_activity.model');
+
+// The Firebase project the app's google-services.json belongs to (mysawari-9dec1). The env var wins when set.
+const FIREBASE_FUNCTIONS_URL = (process.env.FIREBASE_FUNCTIONS_URL || 'https://us-central1-mysawari-9dec1.cloudfunctions.net').replace(/\/+$/, '');
+
+// Payload keys that drive the WhatsApp message on the server; they are never sent to the phone.
+const SERVER_ONLY_KEYS = new Set(['watiTemplate', 'watiParams']);
+
+/**
+ * FCM rejects the WHOLE message when any `data` value is not a string (e.g. the booking confirmation's
+ * watiParams array), so the push was silently never delivered. Only flat values are kept, as strings.
+ */
+function toFcmData(payload) {
+  const data = {};
+  if (!payload || typeof payload !== 'object') return data;
+  for (const [key, value] of Object.entries(payload)) {
+    if (SERVER_ONLY_KEYS.has(key) || value === null || value === undefined) continue;
+    const isId = typeof value === 'object' && value._bsontype === 'ObjectId';
+    if (typeof value === 'object' && !isId) continue;
+    data[key] = String(value).slice(0, 500);
+  }
+  return data;
+}
+
+/** POSTs to one of the Firebase push functions; failures are logged, never thrown (pushes are best effort). */
+async function callFirebase(fn, body) {
+  try {
+    const res = await fetch(`${FIREBASE_FUNCTIONS_URL}/${fn}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      console.error(`[Push] ${fn} failed (${res.status}): ${text.slice(0, 300)}`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error(`[Push] ${fn} failed:`, err.message);
+    return false;
+  }
+}
 
 class NotificationService {
+  /**
+   * Records that a one-off notification was sent, in the existing customer_activity collection.
+   * Returns true only for the first caller, so the same event is never pushed twice.
+   */
+  async claimOnce(action, details, customerId) {
+    const filter = { action };
+    for (const [key, value] of Object.entries(details)) filter[`details.${key}`] = value;
+    const existing = await CustomerActivity.findOneAndUpdate(
+      filter,
+      { $setOnInsert: { customerId: customerId || null } },
+      { upsert: true, new: false }
+    );
+    return !existing;
+  }
+
+  /** Sends a push to the admins' topic (operations team). */
+  async notifyAdmins(title, body, payload) {
+    return callFirebase('sendToAdmins', { title, body, data: toFcmData(payload) });
+  }
+
   /**
    * Register a customer device token
    */
@@ -88,33 +151,6 @@ class NotificationService {
   }
 
   /**
-   * Send a push notification via Expo Push API
-   */
-  async _sendExpoPushNotification(tokens, title, body, data) {
-    if (!tokens || tokens.length === 0) return;
-
-    const messages = tokens.map(token => ({
-      to: token,
-      sound: 'default',
-      title,
-      body,
-      data: data || {},
-    }));
-
-    try {
-      await axios.post('https://exp.host/--/api/v2/push/send', messages, {
-        headers: {
-          Accept: 'application/json',
-          'Accept-encoding': 'gzip, deflate',
-          'Content-Type': 'application/json',
-        }
-      });
-    } catch (error) {
-      console.error('Error sending Expo push notification:', error.message);
-    }
-  }
-
-  /**
    * Create a notification and push it to devices
    */
   async createNotification(data) {
@@ -141,24 +177,17 @@ class NotificationService {
       }
     }
 
-    // Trigger Firebase Cloud Function for FCM Push Notifications (fire-and-forget)
-    const FIREBASE_URL = process.env.FIREBASE_FUNCTIONS_URL || 'https://us-central1-mysawari-customer-app.cloudfunctions.net';
-    
+    // FCM push through the Firebase functions (fire-and-forget). The id lets the app open the right
+    // screen when the customer taps the notification.
+    const pushData = { ...toFcmData(payload), notificationId: String(notification._id) };
     if (target === 'all') {
-      // Send to all customers via FCM topic
-      axios.post(`${FIREBASE_URL}/sendToAllCustomers`, {
-        title,
-        body,
-        data: payload || {}
-      }).catch(err => console.error("Firebase broadcast failed:", err.message));
+      // Every install is subscribed to the all_customers topic
+      callFirebase('sendToAllCustomers', { title, body, data: pushData });
     } else if (target === 'specific' && customerPhone) {
-      // Send to specific customer via FCM topic (customer_<mobile>)
-      axios.post(`${FIREBASE_URL}/sendToSpecificCustomer`, {
-        mobile: customerPhone,
-        title,
-        body,
-        data: payload || {}
-      }).catch(err => console.error("Firebase specific notification failed:", err.message));
+      // The app subscribes to customer_<mobile> at login
+      callFirebase('sendToSpecificCustomer', { mobile: customerPhone, title, body, data: pushData });
+    } else if (target === 'specific') {
+      console.warn(`[Push] No customer phone for "${title}" (customerId: ${customerId || 'none'}) — push not sent`);
     }
 
     // Trigger WATI message if configured in payload
