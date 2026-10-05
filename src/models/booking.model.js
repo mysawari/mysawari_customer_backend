@@ -84,4 +84,6 @@ const bookingSchema = new mongoose.Schema({
   timestamps: true
 });
 
+bookingSchema.index({ mobileNumber: 1, status: 1 });
+
 module.exports = mongoose.model('Booking', bookingSchema);

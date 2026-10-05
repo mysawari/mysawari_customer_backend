@@ -31,4 +31,8 @@ const customerActivitySchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+customerActivitySchema.index({ action: 1, 'details.bookingId': 1 });
+customerActivitySchema.index({ customerId: 1 });
+customerActivitySchema.index({ sessionId: 1 });
+
 module.exports = mongoose.model('CustomerActivity', customerActivitySchema, 'customer_activity');

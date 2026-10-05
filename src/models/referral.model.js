@@ -55,5 +55,6 @@ const referralSchema = new mongoose.Schema({
 
 // Ensure a referrer can only invite a specific mobile number once
 referralSchema.index({ referrerId: 1, referredMobile: 1 }, { unique: true });
+referralSchema.index({ referredMobile: 1, status: 1 });
 
 module.exports = mongoose.model('Referral', referralSchema);
