@@ -39,11 +39,24 @@ async function logWalletTx(customerId, amount, description) {
   }
 }
 
-/** What the commission is worked out on: the vehicle rent after any discount (not fastag / delivery charges). */
+/**
+ * The booking amount the commission is worked out on: the rent the referred customer paid for the trip
+ * after every discount. Security deposit, fastag and pickup / drop charges are not part of it.
+ *  - Booked in the customer app (no createdBy): `vehicleRent` is saved with the coupon already taken off
+ *    (and includes the driver charge); only the membership discount is still to come off.
+ *  - Entered in the operations app (createdBy set): `vehicleRent` is the full rent and `discountAmount`
+ *    is still to come off. Older ops bookings without a rent figure fall back to the total minus extras.
+ */
 function commissionBase(booking) {
-  const payment = booking.payment || {};
-  const rent = Number(payment.vehicleRent) > 0 ? Number(payment.vehicleRent) : Number(payment.totalAmount) || 0;
-  return Math.max(0, rent - (Number(payment.discountAmount) || 0));
+  const p = booking.payment || {};
+  const n = (v) => Math.max(0, Number(v) || 0);
+  if (!booking.createdBy) {
+    return Math.max(0, n(p.vehicleRent) - n(booking.membershipDiscount));
+  }
+  const rent = n(p.vehicleRent) > 0
+    ? n(p.vehicleRent)
+    : n(p.totalAmount) - n(p.securityDeposit) - n(p.fastagAmount) - n(p.pickupCharge) - n(p.dropCharge);
+  return Math.max(0, rent - n(p.discountAmount));
 }
 
 // settle() runs several queries per referral and is called on every wallet / referral screen load.
@@ -108,13 +121,14 @@ class ReferralService {
     });
 
     for (const ref of pendingReferrals) {
-      const booking = await Booking.findOne({
+      // Only a successfully completed trip counts; the first one with a real amount earns the commission.
+      const completed = await Booking.find({
         mobileNumber: ref.referredMobile,
         status: 'completed',
         isDeleted: { $ne: true },
         createdAt: { $gte: ref.invitedAt },
-      }).sort({ createdAt: 1 });
-      
+      }).sort({ createdAt: 1 }).limit(20);
+      const booking = completed.find((b) => commissionBase(b) > 0);
       if (!booking) continue;
 
       const amount = Math.round(commissionBase(booking) * COMMISSION_RATE);
@@ -141,6 +155,10 @@ class ReferralService {
         );
         continue;
       }
+
+      // Older data can hold two referrals for one number; only one of them may ever be paid.
+      const paidElsewhere = await Referral.exists({ referredMobile: ref.referredMobile, status: 'rewarded', _id: { $ne: ref._id } });
+      if (paidElsewhere) continue;
 
       // Reward the referrer
       const won = await Referral.findOneAndUpdate(
@@ -213,3 +231,4 @@ class ReferralService {
 
 module.exports = ReferralService;
 module.exports.COMMISSION_RATE = COMMISSION_RATE;
+module.exports.commissionBase = commissionBase;

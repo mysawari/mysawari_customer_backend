@@ -162,6 +162,12 @@ class AuthService {
       if (referredByCode && referredByCode.trim().length > 0) {
         referrer = await Customer.findOne({ referralCode: referredByCode.trim().toUpperCase() });
       }
+      // Someone who already added this number from "Refer a friend" keeps the referral (one referrer per
+      // number, so a trip earns one commission). It also links a friend who joins without typing a code.
+      const earlierInvite = await Referral.findOne({ referredMobile: mobileNumber }).sort({ createdAt: 1 });
+      if (earlierInvite && String(earlierInvite.referrerId) !== String(referrer?._id)) {
+        referrer = (await Customer.findById(earlierInvite.referrerId)) || referrer;
+      }
 
       user = await Customer.create({
         customerName: (customerName || '').trim().slice(0, 60) || 'New Customer',

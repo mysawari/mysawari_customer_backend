@@ -1,32 +1,31 @@
 const express = require('express');
 const router = express.Router();
 const activityController = require('./activity.controller');
-const protect = require('../../middleware/protect.middleware');
-const protectOptional = protect.protectOptional || protect; // If optional exists, use it, else protect. Actually wait, protectOptional exists in booking.routes.js.
-
-// We should use the same protectOptional logic. Let me just re-implement a quick optional protect if it's missing, but it is exported.
 const jwt = require('jsonwebtoken');
 const Customer = require('../../models/customer.model');
-const AppError = require('../../common/errors/app-error');
 const asyncHandler = require('../../common/utils/async-handler');
+const { JWT_SECRET, JWT_ISSUER, JWT_AUDIENCE } = require('../../config/secrets');
 
-const localProtectOptional = asyncHandler(async (req, res, next) => {
-  let token;
-  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-    token = req.headers.authorization.split(' ')[1];
-  }
-  if (!token) {
-    return next();
-  }
+/**
+ * Works out who logged the activity. The token's signature, issuer and audience are checked like
+ * everywhere else, but an expired access token (they last 15 minutes) still identifies the customer —
+ * otherwise most activity was saved as a guest with no customer id or number. Nothing is read or changed
+ * with it; it only labels the activity row.
+ */
+const identifyCustomer = asyncHandler(async (req, res, next) => {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  if (!token) return next();
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = await Customer.findById(decoded.id).select('-password');
+    const decoded = jwt.verify(token, JWT_SECRET, { issuer: JWT_ISSUER, audience: JWT_AUDIENCE, ignoreExpiration: true });
+    const customer = await Customer.findById(decoded.id).select('_id mobileNumber status').lean();
+    if (customer && customer.status !== 'blocked') req.user = customer;
   } catch (error) {
-    // ignore invalid token for optional routes
+    // A forged or malformed token is simply treated as a guest.
   }
   next();
 });
 
-router.post('/', localProtectOptional, activityController.logActivity);
+router.post('/', identifyCustomer, activityController.logActivity);
 
 module.exports = router;

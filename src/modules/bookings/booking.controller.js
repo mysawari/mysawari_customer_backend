@@ -340,7 +340,7 @@ class BookingController {
 
     // Send push notification for cancellation. The claim stops the background job from sending a second one.
     const NotificationService = require('../notifications/notification.service');
-    NotificationService.claimOnce('sent_cancel_notif', { bookingId: booking._id }, req.user._id)
+    NotificationService.claimOnce('sent_cancel_notif', { bookingId: booking._id }, req.user._id, req.user.mobileNumber)
       .then((first) => first && NotificationService.createNotification({
         target: 'specific',
         customerId: req.user._id,
@@ -904,8 +904,10 @@ class BookingController {
     // 6) Send Notifications — fire-and-forget so the checkout response is instant.
     // The notification, Firebase push, and WATI WhatsApp message all happen in
     // the background. The customer sees "Booking Confirmed" immediately.
+    // The claim (with the customer's id and number) stops the background job from sending a second one.
     const notificationService = require('../notifications/notification.service');
-    notificationService.createNotification({
+    notificationService.claimOnce('sent_confirm_notif', { bookingId: confirmed._id }, req.user._id, req.user.mobileNumber)
+      .then((first) => first && notificationService.createNotification({
       target: 'specific',
       customerId: req.user._id,
       title: 'Booking Confirmed! 🎉',
@@ -918,7 +920,7 @@ class BookingController {
           { name: "vehicle", value: confirmed.vehicleName }
         ]
       }
-    }).catch(err => console.error('Failed to send booking confirmation notification:', err.message));
+    })).catch(err => console.error('Failed to send booking confirmation notification:', err.message));
 
     // Mark any abandoned lead for this user as recovered (non-blocking)
     CustomerAppLead.updateOne(

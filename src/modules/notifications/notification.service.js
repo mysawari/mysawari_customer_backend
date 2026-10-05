@@ -6,7 +6,11 @@ const CustomerActivity = require('../../models/customer_activity.model');
 const FIREBASE_FUNCTIONS_URL = (process.env.FIREBASE_FUNCTIONS_URL || 'https://us-central1-mysawari-9dec1.cloudfunctions.net').replace(/\/+$/, '');
 
 // Payload keys that drive the WhatsApp message on the server; they are never sent to the phone.
-const SERVER_ONLY_KEYS = new Set(['watiTemplate', 'watiParams']);
+const SERVER_ONLY_KEYS = new Set(['watiTemplate', 'watiParams', 'guestSessionId']);
+
+/** The anonymous id the app creates on first launch (services/api/activity.ts), before anyone logs in. */
+const GUEST_SESSION_RE = /^session_[a-z0-9]{6,40}$/;
+const isGuestSessionId = (v) => typeof v === 'string' && GUEST_SESSION_RE.test(v);
 
 /**
  * FCM rejects the WHOLE message when any `data` value is not a string (e.g. the booking confirmation's
@@ -47,15 +51,16 @@ async function callFirebase(fn, body) {
 
 class NotificationService {
   /**
-   * Records that a one-off notification was sent, in the existing customer_activity collection.
-   * Returns true only for the first caller, so the same event is never pushed twice.
+   * Records that a one-off notification was sent, in the existing customer_activity collection, with the
+   * customer's id and mobile number. Returns true only for the first caller, so the same event is never
+   * pushed twice.
    */
-  async claimOnce(action, details, customerId) {
+  async claimOnce(action, details, customerId, mobileNumber) {
     const filter = { action };
     for (const [key, value] of Object.entries(details)) filter[`details.${key}`] = value;
     const existing = await CustomerActivity.findOneAndUpdate(
       filter,
-      { $setOnInsert: { customerId: customerId || null } },
+      { $setOnInsert: { customerId: customerId || null, mobileNumber: mobileNumber || null } },
       { upsert: true, new: false }
     );
     return !existing;
@@ -104,11 +109,13 @@ class NotificationService {
    * Fetch notifications for a specific customer
    * Includes both 'all' target and 'specific' target notifications
    */
-  async getNotifications(customerId) {
-    // Build query: guests only see broadcasts, logged-in users see broadcasts + their specific ones
+  async getNotifications(customerId, guestSessionId) {
+    // Logged-in users see broadcasts + their own; a guest sees broadcasts + the ones sent to their install.
     const query = customerId
       ? { $or: [{ target: 'all' }, { customerId: customerId }] }
-      : { target: 'all' };
+      : isGuestSessionId(guestSessionId)
+        ? { $or: [{ target: 'all' }, { target: 'specific', customerId: null, 'data.guestSessionId': guestSessionId }] }
+        : { target: 'all' };
 
     const notifications = await Notification.find(query).sort({ createdAt: -1 }).limit(50);
     
@@ -154,7 +161,10 @@ class NotificationService {
    * Create a notification and push it to devices
    */
   async createNotification(data) {
-    const { target, customerId, title, body, payload } = data;
+    const { target, customerId, title, body } = data;
+    // A guest (installed, never logged in) is addressed by their install's session id.
+    const guestSessionId = !customerId && isGuestSessionId(data.guestSessionId) ? data.guestSessionId : null;
+    const payload = guestSessionId ? { ...(data.payload || {}), guestSessionId } : data.payload;
     const Customer = require('../../models/customer.model');
     const watiService = require('../../integrations/wati.service');
 
@@ -186,6 +196,9 @@ class NotificationService {
     } else if (target === 'specific' && customerPhone) {
       // The app subscribes to customer_<mobile> at login
       callFirebase('sendToSpecificCustomer', { mobile: customerPhone, title, body, data: pushData });
+    } else if (target === 'specific' && guestSessionId) {
+      // A guest's install subscribes to customer_guest_<session id>; the same function builds that topic.
+      callFirebase('sendToSpecificCustomer', { mobile: `guest_${guestSessionId}`, title, body, data: pushData });
     } else if (target === 'specific') {
       console.warn(`[Push] No customer phone for "${title}" (customerId: ${customerId || 'none'}) — push not sent`);
     }
@@ -204,3 +217,4 @@ class NotificationService {
 }
 
 module.exports = new NotificationService();
+module.exports.isGuestSessionId = isGuestSessionId;

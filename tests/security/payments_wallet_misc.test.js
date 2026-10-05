@@ -118,7 +118,7 @@ test('withdrawals: invalid UPI / bank details are rejected', async () => {
 test('withdrawals: two parallel requests cannot both pass the earnings check', async (t) => {
   let balance = 200;
   stub(t, SawariCashTransaction, {
-    find: () => ({ lean: async () => { await new Promise((r) => setImmediate(r)); return [{ transactionType: 'credit', reason: 'Referral commission', amount: 100 }]; } }),
+    find: () => ({ sort: () => ({ limit: () => ({ lean: async () => { await new Promise((r) => setImmediate(r)); return [{ transactionType: 'credit', reason: 'Referral commission', amount: 100 }]; } }) }) }),
     create: async () => ({}),
   });
   stub(t, Customer, {

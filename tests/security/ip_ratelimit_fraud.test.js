@@ -137,7 +137,10 @@ function signupStubs(t, { referrer, referrerSessions = [], recentReferred = [] }
     create: async () => ({}),
   });
   stub(t, SawariCashTransaction, { create: async () => ({}) });
-  stub(t, Referral, { findOneAndUpdate: async (f, u) => { created.referral = u.$set; return {}; } });
+  stub(t, Referral, {
+    findOne: () => ({ sort: async () => null }), // no earlier "Refer a friend" invite for this number
+    findOneAndUpdate: async (f, u) => { created.referral = u.$set; return {}; },
+  });
   return created;
 }
 
@@ -191,7 +194,7 @@ test('referral payout: two accounts used on the same phone get no commission', a
     updateOne: async (f, u) => { if (u.$set.status === 'fraudulent') flagged = true; },
     findOneAndUpdate: async () => ({}),
   });
-  stub(t, Booking, { findOne: () => ({ sort: async () => ({ _id: 'b', payment: { vehicleRent: 5000 } }) }) });
+  stub(t, Booking, { find: () => ({ sort: () => ({ limit: async () => [{ _id: 'b', payment: { vehicleRent: 5000 } }] }) }) });
   stub(t, Token, {
     find: (q) => ({ select: () => ({ limit: () => ({ lean: async () => [{ deviceInfo: `ua | iid:${IID}` }] }) }) }),
   });

@@ -16,6 +16,15 @@ class CustomerActivityController {
       return ApiResponse.error(res, 'Action is required', 400);
     }
 
+    // When a guest logs in, everything they did on this install before is linked to their account,
+    // so their profile (what they looked at and searched for) carries over.
+    if (customerId && action === 'AUTH_LOGIN' && /^session_[a-z0-9]{6,40}$/.test(String(sessionId || ''))) {
+      CustomerActivity.updateMany(
+        { sessionId, customerId: null },
+        { $set: { customerId, mobileNumber } }
+      ).catch((err) => console.error('Linking guest activity failed', err.message));
+    }
+
     const activity = await CustomerActivity.create({
       customerId,
       mobileNumber,
