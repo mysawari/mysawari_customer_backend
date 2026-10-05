@@ -2,8 +2,27 @@ const Notification = require('../../models/notification.model');
 const CustomerDevice = require('../../models/customer_device.model');
 const CustomerActivity = require('../../models/customer_activity.model');
 
-// The Firebase project the app's google-services.json belongs to (mysawari-9dec1). The env var wins when set.
-const FIREBASE_FUNCTIONS_URL = (process.env.FIREBASE_FUNCTIONS_URL || 'https://us-central1-mysawari-9dec1.cloudfunctions.net').replace(/\/+$/, '');
+const admin = require('firebase-admin');
+const fs = require('fs');
+const path = require('path');
+
+// Initialize Firebase Admin locally instead of relying on Cloud Functions (avoids Blaze plan requirement)
+let firebaseInitialized = false;
+try {
+  const serviceAccountPath = path.join(process.cwd(), 'firebase-key.json');
+  if (fs.existsSync(serviceAccountPath)) {
+    const serviceAccount = require(serviceAccountPath);
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+    firebaseInitialized = true;
+    console.log('[Push] Firebase Admin initialized successfully.');
+  } else {
+    console.warn('[Push] firebase-key.json not found in backend root! Push notifications are DISABLED.');
+  }
+} catch (error) {
+  console.error('[Push] Failed to initialize Firebase Admin:', error.message);
+}
 
 // Payload keys that drive the WhatsApp message on the server; they are never sent to the phone.
 const SERVER_ONLY_KEYS = new Set(['watiTemplate', 'watiParams', 'guestSessionId']);
@@ -28,20 +47,36 @@ function toFcmData(payload) {
   return data;
 }
 
-/** POSTs to one of the Firebase push functions; failures are logged, never thrown (pushes are best effort). */
+/** Sends push notification using Firebase Admin SDK directly; failures are logged, never thrown (best effort). */
 async function callFirebase(fn, body) {
+  if (!firebaseInitialized) {
+    console.warn(`[Push] Cannot send "${body.title}", firebase-admin not initialized.`);
+    return false;
+  }
+  
   try {
-    const res = await fetch(`${FIREBASE_FUNCTIONS_URL}/${fn}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      console.error(`[Push] ${fn} failed (${res.status}): ${text.slice(0, 300)}`);
+    let topic;
+    if (fn === 'sendToAllCustomers') {
+      topic = 'all_customers';
+    } else if (fn === 'sendToSpecificCustomer') {
+      topic = `customer_${body.mobile.replace(/[^a-zA-Z0-9-_.~%]/g, '')}`;
+    } else if (fn === 'sendToAdmins') {
+      topic = 'admin_notifications';
+    } else {
+      console.warn(`[Push] Unknown function name: ${fn}`);
       return false;
     }
+
+    const message = {
+      notification: {
+        title: body.title,
+        body: body.body,
+      },
+      data: body.data || {},
+      topic: topic,
+    };
+
+    const response = await admin.messaging().send(message);
     return true;
   } catch (err) {
     console.error(`[Push] ${fn} failed:`, err.message);
