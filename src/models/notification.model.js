@@ -32,6 +32,10 @@ const notificationSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Customer'
   }],
+  deletedBy: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Customer'
+  }],
   isRead: {
     type: Boolean,
     default: false

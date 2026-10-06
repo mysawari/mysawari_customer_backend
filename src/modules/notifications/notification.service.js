@@ -147,7 +147,12 @@ class NotificationService {
   async getNotifications(customerId, guestSessionId) {
     // Logged-in users see broadcasts + their own; a guest sees broadcasts + the ones sent to their install.
     const query = customerId
-      ? { $or: [{ target: 'all' }, { customerId: customerId }] }
+      ? { 
+          $or: [
+            { target: 'all', deletedBy: { $ne: customerId } }, 
+            { customerId: customerId, deletedBy: { $ne: customerId } }
+          ] 
+        }
       : isGuestSessionId(guestSessionId)
         ? { $or: [{ target: 'all' }, { target: 'specific', customerId: null, 'data.guestSessionId': guestSessionId }] }
         : { target: 'all' };
@@ -189,7 +194,20 @@ class NotificationService {
     const n = notification.toJSON();
     if (n.target === 'all') n.isRead = true;
     delete n.readBy; // other customers' ids are never sent to a customer
+    delete n.deletedBy;
     return n;
+  }
+
+  /**
+   * Clear all notifications for a customer
+   */
+  async clearAllNotifications(customerId) {
+    if (!customerId) return { success: true };
+    // Delete all specific notifications
+    await Notification.deleteMany({ target: 'specific', customerId });
+    // Add customerId to deletedBy for all broadcast notifications
+    await Notification.updateMany({ target: 'all' }, { $addToSet: { deletedBy: customerId } });
+    return { success: true };
   }
 
   /**

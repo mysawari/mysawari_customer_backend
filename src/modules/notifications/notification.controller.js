@@ -88,6 +88,13 @@ class NotificationController {
     await notificationService.unregisterDeviceForCustomer(customerId, expoPushToken);
     return ApiResponse.success(res, null, 'Device unregistered successfully');
   });
+
+  // DELETE /api/notifications
+  clearAll = asyncHandler(async (req, res) => {
+    const customerId = req.user._id;
+    await notificationService.clearAllNotifications(customerId);
+    return ApiResponse.success(res, null, 'All notifications cleared');
+  });
 }
 
 module.exports = new NotificationController();
