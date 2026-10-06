@@ -143,6 +143,12 @@ class BookingController {
         p.totalAmount = hb.totalAmount ?? hp.totalAmount ?? p.totalAmount;
         p.balanceAmount = hb.balanceAmount ?? hp.balanceAmount ?? p.balanceAmount;
         p.totalCollected = hb.totalCollected ?? hp.totalCollected ?? p.totalCollected ?? ((hp.bookingAmountPaid || 0) + (hp.amountReceivedNow || 0));
+        p.vehicleRent = hb.totalFare ?? hp.totalFare ?? p.vehicleRent;
+        p.pickupCharge = hb.pickupCharge ?? hp.pickupCharge ?? p.pickupCharge;
+        p.dropCharge = hb.dropCharge ?? hp.dropCharge ?? p.dropCharge;
+        p.fastagAmount = hb.fastTagPayable ?? hp.fastTagPayable ?? p.fastagAmount;
+        p.securityDeposit = hb.securityDeposit ?? hp.securityDeposit ?? p.securityDeposit;
+        p.discountAmount = hb.discountAmount ?? hp.discountAmount ?? p.discountAmount;
       }
 
       return { 

@@ -143,7 +143,7 @@ function profileMessages(p, { guest }) {
   return out;
 }
 
-const GUEST_QUIET_MS = 30 * MINUTE; // not while they are still using the app
+const GUEST_QUIET_MS = 1 * MINUTE; // Reduced to 1 min for easier testing (originally 30 * MINUTE)
 const GUEST_LOOKBACK_MS = 3 * DAY;  // only people who used the app recently
 const GUEST_MAX_PUSHES = 3;
 const GUEST_RUN_LIMIT = 300;
@@ -191,8 +191,8 @@ const sendSmartNotifications = async () => {
   smartRunning = true;
   try {
     // 1. Abandoned checkout & contextual marketing: customers who browsed, searched or started checkout
-    //    15–45 minutes ago and haven't booked since. At most one of these per customer per day.
-    const fifteenMinutesAgo = new Date(Date.now() - 15 * MINUTE);
+    //    1–45 minutes ago and haven't booked since. At most one of these per customer per day.
+    const fifteenMinutesAgo = new Date(Date.now() - 1 * MINUTE); // Reduced from 15 MINUTE for testing
     const fortyFiveMinutesAgo = new Date(Date.now() - 45 * MINUTE);
     const recentActivities = await CustomerActivity.aggregate([
       {
@@ -381,9 +381,9 @@ const sendTransactionalNotifications = async () => {
 
 const startSmartNotificationJobs = () => {
   console.log('⏱️  Starting Smart Push Notifications Background Jobs');
-  // Marketing, abandonment and late returns run every 15 minutes
-  setInterval(sendSmartNotifications, 15 * MINUTE);
-  setTimeout(sendSmartNotifications, 2 * MINUTE);
+  // Marketing, abandonment and late returns run every 1 minute (for testing, originally 15 mins)
+  setInterval(sendSmartNotifications, 1 * MINUTE);
+  setTimeout(sendSmartNotifications, 5 * 1000);
 
   // Transactional (confirmed / cancelled / trip started / trip completed) runs every minute for a near-instant feel
   setInterval(sendTransactionalNotifications, MINUTE);
