@@ -168,7 +168,7 @@ async function sendGuestNotifications() {
 
       const sent = await CustomerActivity.find({ action: 'sent_guest_notif', sessionId }).select('details createdAt').lean();
       if (sent.length >= GUEST_MAX_PUSHES) continue;
-      if (sent.some((x) => now - new Date(x.createdAt).getTime() < DAY)) continue;
+      // if (sent.some((x) => now - new Date(x.createdAt).getTime() < DAY)) continue; // TEMPORARILY DISABLED FOR TESTING
 
       const used = new Set(sent.map((x) => x.details && x.details.key));
       const msg = profileMessages(analyzeProfile(g.acts), { guest: true }).find((m) => !used.has(m.key));
