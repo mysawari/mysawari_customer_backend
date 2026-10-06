@@ -127,19 +127,19 @@ function profileMessages(p, { guest }) {
   const out = [];
   if (p.checkoutCarId) {
     const car = p.checkoutCarName || 'Your vehicle';
-    out.push({ key: `checkout:${p.checkoutCarId}`, title: `${car} is still available 🚗`,
+    out.push({ key: `checkout:${p.checkoutCarId}`, carId: p.checkoutCarId, title: `${car} is still available 🚗`,
       body: guest ? `You were one step away!${join}` : 'You were one step away! Complete your booking before someone else books it.' });
   }
   if (p.topCar) {
     const many = p.topCar.views >= 2;
-    out.push({ key: `car:${p.topCar.id}`, title: many ? `You checked out the ${p.topCar.name} ${p.topCar.views} times 👀` : `Still thinking about the ${p.topCar.name}?`,
+    out.push({ key: `car:${p.topCar.id}`, carId: p.topCar.id, title: many ? `You checked out the ${p.topCar.name} ${p.topCar.views} times 👀` : `Still thinking about the ${p.topCar.name}?`,
       body: `Book it before it's gone — vehicles like this get booked fast on MySawari.${join}` });
   }
-  if (p.searches[0]) out.push({ key: `search:${p.searches[0].toLowerCase()}`, title: `Looking for a ride in ${p.searches[0]}? 📍`, body: `Self-drive cars and bikes are ready around ${p.searches[0]}.${join}` });
-  if (p.destinations[0]) out.push({ key: `dest:${p.destinations[0]}`, title: `Planning a trip to ${p.destinations[0]}? 🏔️`, body: `Make it unforgettable with your own MySawari ride.${join}` });
-  if (p.deals[0]) out.push({ key: `deal:${p.deals[0]}`, title: 'Special deal just for you! 🌟', body: `Book the ${p.deals[0]} before the offer expires.${join}` });
-  if (p.offers[0]) out.push({ key: `offer:${p.offers[0]}`, title: 'Don’t forget your discount! 🎁', body: `Use code ${p.offers[0]} on your next ride.${join}` });
-  if (guest) out.push({ key: 'welcome', title: 'Welcome to MySawari! 🚗', body: `Self-drive cars and bikes across the Northeast.${join}` });
+  if (p.searches[0]) out.push({ key: `search:${p.searches[0].toLowerCase()}`, link: '/explore', title: `Looking for a ride in ${p.searches[0]}? 📍`, body: `Self-drive cars and bikes are ready around ${p.searches[0]}.${join}` });
+  if (p.destinations[0]) out.push({ key: `dest:${p.destinations[0]}`, link: '/explore', title: `Planning a trip to ${p.destinations[0]}? 🏔️`, body: `Make it unforgettable with your own MySawari ride.${join}` });
+  if (p.deals[0]) out.push({ key: `deal:${p.deals[0]}`, link: '/notifications', title: 'Special deal just for you! 🌟', body: `Book the ${p.deals[0]} before the offer expires.${join}` });
+  if (p.offers[0]) out.push({ key: `offer:${p.offers[0]}`, link: '/notifications', title: 'Don’t forget your discount! 🎁', body: `Use code ${p.offers[0]} on your next ride.${join}` });
+  if (guest) out.push({ key: 'welcome', link: '/', title: 'Welcome to MySawari! 🚗', body: `Self-drive cars and bikes across the Northeast.${join}` });
   return out;
 }
 
@@ -177,7 +177,7 @@ async function sendGuestNotifications() {
       await CustomerActivity.create({ action: 'sent_guest_notif', sessionId, details: { key: msg.key } });
       await notificationService.createNotification({
         target: 'specific', customerId: null, guestSessionId: sessionId, title: msg.title, body: msg.body,
-        payload: { kind: 'guest_engagement' },
+        payload: { kind: 'guest_engagement', link: msg.link },
       });
     } catch (err) {
       console.error('[SmartNotifJob] Guest notification failed:', err.message);
@@ -225,10 +225,11 @@ const sendSmartNotifications = async () => {
 
         const history = await CustomerActivity.find({ customerId: customer._id, action: { $in: BROWSE_ACTIONS }, createdAt: { $gte: new Date(Date.now() - 7 * DAY) } })
           .sort({ createdAt: -1 }).limit(100).lean();
-        const { title, body } = profileMessages(analyzeProfile(history), { guest: false })[0] || marketingMessage(act);
+        const profileMessage = profileMessages(analyzeProfile(history), { guest: false })[0];
+        const { title, body, link } = profileMessage || marketingMessage(act);
         await CustomerActivity.create({ action: 'sent_marketing_notif', customerId: customer._id, mobileNumber: customer.mobileNumber });
         await notificationService.createNotification({
-          target: 'specific', customerId: customer._id, title, body, payload: act.details
+          target: 'specific', customerId: customer._id, title, body, payload: { ...act.details, link }
         });
       } catch (err) {
         console.error('[SmartNotifJob] Marketing notification failed:', err.message);
