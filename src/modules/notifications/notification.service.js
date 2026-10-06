@@ -47,7 +47,7 @@ function toFcmData(payload) {
   return data;
 }
 
-/** Sends push notification using Firebase Admin SDK directly; failures are logged, never thrown (best effort). */
+/** Sends push notification using Firebase Admin SDK topics; failures are logged, never thrown (best effort). */
 async function callFirebase(fn, body) {
   if (!firebaseInitialized) {
     console.warn(`[Push] Cannot send "${body.title}", firebase-admin not initialized.`);
@@ -91,10 +91,59 @@ async function callFirebase(fn, body) {
     };
 
     const response = await admin.messaging().send(message);
+    console.log(`[Push] FCM topic "${topic}" sent OK:`, response);
     return true;
   } catch (err) {
     console.error(`[Push] ${fn} failed:`, err.message);
     return false;
+  }
+}
+
+/**
+ * Sends push notifications directly to registered Expo device tokens via Expo's push API.
+ * This is the critical fallback: FCM topic subscriptions can silently fail, but the device
+ * token is registered reliably when the app launches.  Both mechanisms fire in parallel
+ * so the customer always gets the push.
+ */
+async function sendDirectPushToDevices(tokens, title, body, data) {
+  if (!tokens || tokens.length === 0) return;
+  const messages = tokens.map((token) => ({
+    to: token,
+    sound: 'default',
+    title,
+    body,
+    data: data || {},
+    priority: 'high',
+    channelId: 'default',
+  }));
+
+  // Expo push API accepts batches of up to 100
+  const BATCH = 100;
+  for (let i = 0; i < messages.length; i += BATCH) {
+    const batch = messages.slice(i, i + BATCH);
+    try {
+      const res = await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(batch),
+      });
+      const json = await res.json();
+      // Log any ticket-level errors (expired tokens, etc.) so we can clean up stale devices
+      if (json.data) {
+        json.data.forEach((ticket, idx) => {
+          if (ticket.status === 'error') {
+            console.warn(`[Push][Expo] Token "${batch[idx].to}" error: ${ticket.message}`);
+            // Clean up invalid tokens
+            if (ticket.details?.error === 'DeviceNotRegistered') {
+              CustomerDevice.deleteOne({ expoPushToken: batch[idx].to }).catch(() => {});
+            }
+          }
+        });
+      }
+      console.log(`[Push][Expo] Sent ${batch.length} direct push(es)`);
+    } catch (err) {
+      console.error('[Push][Expo] Direct push failed:', err.message);
+    }
   }
 }
 
@@ -254,20 +303,48 @@ class NotificationService {
       }
     }
 
-    // FCM push through the Firebase functions (fire-and-forget). The id lets the app open the right
+    // FCM push through Firebase Admin (fire-and-forget). The id lets the app open the right
     // screen when the customer taps the notification.
     const pushData = { ...toFcmData(payload), notificationId: String(notification._id) };
+
+    // ── 1) FCM topic push (existing mechanism) ──
     if (target === 'all') {
-      // Every install is subscribed to the all_customers topic
       callFirebase('sendToAllCustomers', { title, body, data: pushData });
     } else if (target === 'specific' && customerPhone) {
-      // The app subscribes to customer_<mobile> at login
       callFirebase('sendToSpecificCustomer', { mobile: customerPhone, title, body, data: pushData });
     } else if (target === 'specific' && guestSessionId) {
-      // A guest's install subscribes to customer_guest_<session id>; the same function builds that topic.
       callFirebase('sendToSpecificCustomer', { mobile: `guest_${guestSessionId}`, title, body, data: pushData });
     } else if (target === 'specific') {
-      console.warn(`[Push] No customer phone for "${title}" (customerId: ${customerId || 'none'}) — push not sent`);
+      console.warn(`[Push] No customer phone for "${title}" (customerId: ${customerId || 'none'}) — FCM topic push skipped`);
+    }
+
+    // ── 2) Direct Expo push to registered device tokens (critical fallback) ──
+    // FCM topic subscriptions can silently fail. The Expo device token is registered reliably
+    // at app launch, so this guarantees the push always reaches the customer's phone.
+    try {
+      let deviceTokens = [];
+      if (target === 'specific' && customerId) {
+        // All devices registered by this customer
+        const devices = await CustomerDevice.find({ customerId }).select('expoPushToken').lean();
+        deviceTokens = devices.map(d => d.expoPushToken).filter(Boolean);
+      } else if (target === 'specific' && !customerId) {
+        // Guest: find devices with no customerId (anonymous registrations)
+        // We can't target a specific guest device by session id, but the FCM topic covers it.
+        // Skip direct push for anonymous guests.
+      } else if (target === 'all') {
+        // Broadcast: send to ALL registered device tokens
+        const devices = await CustomerDevice.find({}).select('expoPushToken').lean();
+        deviceTokens = devices.map(d => d.expoPushToken).filter(Boolean);
+      }
+
+      if (deviceTokens.length > 0) {
+        // Fire-and-forget: don't block the response
+        sendDirectPushToDevices(deviceTokens, title, body, pushData).catch(err => {
+          console.error('[Push][Expo] Direct push delivery failed:', err.message);
+        });
+      }
+    } catch (err) {
+      console.error('[Push][Expo] Failed to query device tokens:', err.message);
     }
 
     // Trigger WATI message if configured in payload
