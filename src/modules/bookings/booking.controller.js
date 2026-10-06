@@ -5,6 +5,7 @@ const asyncHandler = require('../../common/utils/async-handler');
 const mongoose = require('mongoose');
 const Booking = require('../../models/booking.model');
 const ExtendBooking = require('../../models/extend_booking.model');
+const Refund = require('../../models/refund.model');
 const SawariCashTransaction = require('../../models/sawaricash_transaction.model');
 const Vehicle = require('../../models/vehicle.model');
 const Customer = require('../../models/customer.model');
@@ -120,6 +121,7 @@ class BookingController {
     
     const bookingIds = bookings.map(b => b._id);
     const extensions = await ExtendBooking.find({ bookingId: { $in: bookingIds } }).lean();
+    const refunds = await Refund.find({ bookingId: { $in: bookingIds } }).lean();
 
     // Fetch handovers because the Operations app updates financial figures inside the handover
     // document rather than on the original Booking document when the car is taken.
@@ -131,6 +133,7 @@ class BookingController {
     const bookingsWithExts = bookings.map(b => {
       const exts = extensions.filter(e => e.bookingId.toString() === b._id.toString());
       const bookingHandover = handovers.find(h => h.bookingId && h.bookingId.toString() === b._id.toString());
+      const bookingRefund = refunds.find(r => r.bookingId.toString() === b._id.toString());
       
       let p = { ...(b.payment || {}) };
       if (bookingHandover && bookingHandover.payment) {
@@ -142,7 +145,18 @@ class BookingController {
         p.totalCollected = hb.totalCollected ?? hp.totalCollected ?? p.totalCollected ?? ((hp.bookingAmountPaid || 0) + (hp.amountReceivedNow || 0));
       }
 
-      return { ...b, payment: p, extensions: exts, customerEmail: req.user.email };
+      return { 
+        ...b, 
+        payment: p, 
+        extensions: exts,
+        pendingRefund: bookingRefund ? {
+          refundAmount: bookingRefund.amount,
+          requestedAt: bookingRefund.createdAt,
+          reason: bookingRefund.reason,
+          status: bookingRefund.status
+        } : null,
+        customerEmail: req.user.email 
+      };
     });
 
     // Cancellation outcome is derived from the policy (no extra DB fields needed).
