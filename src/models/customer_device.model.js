@@ -6,6 +6,10 @@ const customerDeviceSchema = new mongoose.Schema({
     ref: 'Customer',
     index: true,
   },
+  guestSessionId: {
+    type: String,
+    index: true,
+  },
   expoPushToken: {
     type: String,
     required: true,

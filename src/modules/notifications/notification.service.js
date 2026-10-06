@@ -172,18 +172,25 @@ class NotificationService {
   /**
    * Register a customer device token
    */
-  async registerDevice(customerId, expoPushToken, deviceType) {
+  async registerDevice(customerId, expoPushToken, deviceType, guestSessionId) {
     let device = await CustomerDevice.findOne({ expoPushToken });
     if (device) {
+      let needsSave = false;
       if ((!device.customerId && customerId) || (device.customerId && customerId && device.customerId.toString() !== customerId.toString())) {
         device.customerId = customerId;
-        device.deviceType = deviceType || device.deviceType;
-        await device.save();
-      } else if (!device.customerId && !customerId) {
-        // already anonymous
+        needsSave = true;
       }
+      if (guestSessionId && device.guestSessionId !== guestSessionId) {
+        device.guestSessionId = guestSessionId;
+        needsSave = true;
+      }
+      if (deviceType && device.deviceType !== deviceType) {
+        device.deviceType = deviceType;
+        needsSave = true;
+      }
+      if (needsSave) await device.save();
     } else {
-      device = new CustomerDevice({ customerId: customerId || undefined, expoPushToken, deviceType });
+      device = new CustomerDevice({ customerId: customerId || undefined, guestSessionId: guestSessionId || undefined, expoPushToken, deviceType });
       await device.save();
     }
     return device;
@@ -327,10 +334,10 @@ class NotificationService {
         // All devices registered by this customer
         const devices = await CustomerDevice.find({ customerId }).select('expoPushToken').lean();
         deviceTokens = devices.map(d => d.expoPushToken).filter(Boolean);
-      } else if (target === 'specific' && !customerId) {
-        // Guest: find devices with no customerId (anonymous registrations)
-        // We can't target a specific guest device by session id, but the FCM topic covers it.
-        // Skip direct push for anonymous guests.
+      } else if (target === 'specific' && !customerId && guestSessionId) {
+        // Guest: find devices registered with this guest session ID
+        const devices = await CustomerDevice.find({ guestSessionId }).select('expoPushToken').lean();
+        deviceTokens = devices.map(d => d.expoPushToken).filter(Boolean);
       } else if (target === 'all') {
         // Broadcast: send to ALL registered device tokens
         const devices = await CustomerDevice.find({}).select('expoPushToken').lean();

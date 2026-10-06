@@ -64,7 +64,7 @@ class NotificationController {
   // POST /api/notifications/register-anonymous-device
   registerAnonymousDevice = asyncHandler(async (req, res) => {
     const customerId = null;
-    const { expoPushToken } = req.body || {};
+    const { expoPushToken, guestSessionId } = req.body || {};
     const deviceType = ['ios', 'android', 'web'].includes(req.body?.deviceType) ? req.body.deviceType : 'unknown';
     if (!expoPushToken || typeof expoPushToken !== 'string' || expoPushToken.length > 200) {
       throw new AppError('A valid Expo Push Token is required', 400);
@@ -73,7 +73,7 @@ class NotificationController {
     if (!expoPushToken.startsWith('ExponentPushToken[') && !expoPushToken.startsWith('ExpoPushToken[')) {
       throw new AppError('Invalid Expo Push Token format', 400);
     }
-    const device = await notificationService.registerDevice(customerId, expoPushToken, deviceType);
+    const device = await notificationService.registerDevice(customerId, expoPushToken, deviceType, guestSessionId);
     return ApiResponse.success(res, device, 'Anonymous device registered');
   });
 
