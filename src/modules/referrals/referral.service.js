@@ -17,8 +17,9 @@ async function shareADevice(customerA, customerB) {
   return b.some((t) => ids.has(installIdFromDeviceInfo(t.deviceInfo)));
 }
 
-// The referrer earns this share of the referred customer's first completed trip.
-const COMMISSION_RATE = 0.10;
+// First referral earns 10%, subsequent referrals earn 5%.
+const FIRST_COMMISSION_RATE = 0.10;
+const SUBSEQUENT_COMMISSION_RATE = 0.05;
 
 const normalizeMobile = (raw) => String(raw || '').replace(/\D/g, '').slice(-10);
 const isValidMobile = (mobile) => /^[6-9]\d{9}$/.test(mobile);
@@ -50,13 +51,7 @@ async function logWalletTx(customerId, amount, description) {
 function commissionBase(booking) {
   const p = booking.payment || {};
   const n = (v) => Math.max(0, Number(v) || 0);
-  if (!booking.createdBy) {
-    return Math.max(0, n(p.vehicleRent) - n(booking.membershipDiscount));
-  }
-  const rent = n(p.vehicleRent) > 0
-    ? n(p.vehicleRent)
-    : n(p.totalAmount) - n(p.securityDeposit) - n(p.fastagAmount) - n(p.pickupCharge) - n(p.dropCharge);
-  return Math.max(0, rent - n(p.discountAmount));
+  return Math.max(0, n(p.totalAmount) - n(p.securityDeposit) - n(p.fastagAmount));
 }
 
 // settle() runs several queries per referral and is called on every wallet / referral screen load.
@@ -113,6 +108,7 @@ class ReferralService {
     if (!referrer) return 0;
 
     let credited = 0;
+    let rewardedCount = await Referral.countDocuments({ referrerId: referrer._id, status: 'rewarded' });
     
     // Find all pending referrals for this referrer
     const pendingReferrals = await Referral.find({
@@ -131,7 +127,8 @@ class ReferralService {
       const booking = completed.find((b) => commissionBase(b) > 0);
       if (!booking) continue;
 
-      const amount = Math.round(commissionBase(booking) * COMMISSION_RATE);
+      const currentRate = rewardedCount === 0 ? FIRST_COMMISSION_RATE : SUBSEQUENT_COMMISSION_RATE;
+      const amount = Math.round(commissionBase(booking) * currentRate);
       if (amount <= 0) continue;
 
       // Anti-fraud check: compare IP addresses
@@ -174,6 +171,7 @@ class ReferralService {
       );
       
       if (won) {
+        rewardedCount++;
         await Customer.updateOne(
           { _id: referrer._id },
           { $inc: { walletBalance: amount } }
@@ -230,5 +228,6 @@ class ReferralService {
 }
 
 module.exports = ReferralService;
-module.exports.COMMISSION_RATE = COMMISSION_RATE;
+module.exports.FIRST_COMMISSION_RATE = FIRST_COMMISSION_RATE;
+module.exports.SUBSEQUENT_COMMISSION_RATE = SUBSEQUENT_COMMISSION_RATE;
 module.exports.commissionBase = commissionBase;
