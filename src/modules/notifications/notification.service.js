@@ -74,6 +74,20 @@ async function callFirebase(fn, body) {
       },
       data: body.data || {},
       topic: topic,
+      android: {
+        priority: 'high',
+        notification: {
+          sound: 'default'
+        }
+      },
+      apns: {
+        payload: {
+          aps: {
+            contentAvailable: true,
+            sound: 'default'
+          }
+        }
+      }
     };
 
     const response = await admin.messaging().send(message);
