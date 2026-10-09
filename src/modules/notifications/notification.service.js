@@ -9,16 +9,25 @@ const path = require('path');
 // Initialize Firebase Admin locally instead of relying on Cloud Functions (avoids Blaze plan requirement)
 let firebaseInitialized = false;
 try {
+  let serviceAccount = null;
   const serviceAccountPath = path.join(process.cwd(), 'firebase-key.json');
-  if (fs.existsSync(serviceAccountPath)) {
-    const serviceAccount = require(serviceAccountPath);
+
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    // 1. Try to load from .env variable first (for production/cloud hosting)
+    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+  } else if (fs.existsSync(serviceAccountPath)) {
+    // 2. Fallback to local file if .env is not set
+    serviceAccount = require(serviceAccountPath);
+  }
+
+  if (serviceAccount) {
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount)
     });
     firebaseInitialized = true;
     console.log('[Push] Firebase Admin initialized successfully.');
   } else {
-    console.warn('[Push] firebase-key.json not found in backend root! Push notifications are DISABLED.');
+    console.warn('[Push] Neither FIREBASE_SERVICE_ACCOUNT env var nor firebase-key.json found! Push notifications are DISABLED.');
   }
 } catch (error) {
   console.error('[Push] Failed to initialize Firebase Admin:', error.message);
