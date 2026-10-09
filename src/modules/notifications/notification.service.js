@@ -285,12 +285,21 @@ class NotificationService {
   /**
    * Clear all notifications for a customer
    */
-  async clearAllNotifications(customerId) {
-    if (!customerId) return { success: true };
-    // Delete all specific notifications
-    await Notification.deleteMany({ target: 'specific', customerId });
-    // Add customerId to deletedBy for all broadcast notifications
-    await Notification.updateMany({ target: 'all' }, { $addToSet: { deletedBy: customerId } });
+  async clearAllNotifications(customerId, guestSessionId = null) {
+    if (!customerId && !this.isGuestSessionId(guestSessionId)) return { success: true };
+
+    if (customerId) {
+      // Delete all specific notifications for this logged-in customer
+      await Notification.deleteMany({ target: 'specific', customerId });
+      // Add customerId to deletedBy for all broadcast notifications
+      await Notification.updateMany({ target: 'all' }, { $addToSet: { deletedBy: customerId } });
+    } else if (guestSessionId) {
+      // Delete specific notifications for this guest session
+      await Notification.deleteMany({ target: 'specific', customerId: null, 'data.guestSessionId': guestSessionId });
+      // We do not add guestSessionId to deletedBy for broadcasts because it requires an array of strings,
+      // but deletedBy is an array of ObjectIds! The frontend will handle ignoring broadcasts if cleared.
+    }
+    
     return { success: true };
   }
 

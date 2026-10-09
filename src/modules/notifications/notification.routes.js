@@ -15,8 +15,8 @@ router.post('/unregister-device', protect, deviceLimiter, notificationController
 
 // Customer fetching their notifications
 router.get('/', protectOptional, notificationController.getNotifications);
-router.delete('/', protect, notificationController.clearAll);
-router.put('/:id/read', protect, notificationController.markAsRead);
+router.delete('/', protectOptional, notificationController.clearAll);
+router.put('/:id/read', protectOptional, notificationController.markAsRead);
 
 // Operation App creating notifications (Admin-only — requires x-admin-key header)
 router.post('/', requireAdminKey, notificationController.createNotification);

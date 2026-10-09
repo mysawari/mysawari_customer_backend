@@ -38,7 +38,7 @@ class NotificationController {
 
   // PUT /api/notifications/:id/read
   markAsRead = asyncHandler(async (req, res) => {
-    const customerId = req.user._id;
+    const customerId = req.user ? req.user._id : null;
     const notificationId = req.params.id;
     if (!mongoose.isValidObjectId(notificationId)) throw new AppError('Invalid notification', 400);
     const notification = await notificationService.markAsRead(notificationId, customerId);
@@ -47,7 +47,7 @@ class NotificationController {
 
   // POST /api/notifications/register-device
   registerDevice = asyncHandler(async (req, res) => {
-    const customerId = req.user._id;
+    const customerId = req.user ? req.user._id : null;
     const { expoPushToken } = req.body || {};
     const deviceType = ['ios', 'android', 'web'].includes(req.body?.deviceType) ? req.body.deviceType : 'unknown';
     if (!expoPushToken || typeof expoPushToken !== 'string' || expoPushToken.length > 200) {
@@ -80,20 +80,25 @@ class NotificationController {
 
   // POST /api/notifications/unregister-device
   unregisterDevice = asyncHandler(async (req, res) => {
-    const customerId = req.user._id;
+    const customerId = req.user ? req.user._id : null;
     const { expoPushToken } = req.body || {};
     if (!expoPushToken || typeof expoPushToken !== 'string' || expoPushToken.length > 200) {
       throw new AppError('Expo Push Token is required', 400);
     }
     // Only allow unregistering tokens that belong to this customer
-    await notificationService.unregisterDeviceForCustomer(customerId, expoPushToken);
+    if (customerId) {
+      await notificationService.unregisterDeviceForCustomer(customerId, expoPushToken);
+    } else {
+      await notificationService.unregisterDevice(expoPushToken);
+    }
     return ApiResponse.success(res, null, 'Device unregistered successfully');
   });
 
   // DELETE /api/notifications
   clearAll = asyncHandler(async (req, res) => {
-    const customerId = req.user._id;
-    await notificationService.clearAllNotifications(customerId);
+    const customerId = req.user ? req.user._id : null;
+    const guestSessionId = customerId ? null : req.headers['x-guest-session'];
+    await notificationService.clearAllNotifications(customerId, guestSessionId);
     return ApiResponse.success(res, null, 'All notifications cleared');
   });
 }
