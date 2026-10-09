@@ -15,7 +15,7 @@ const errorMiddleware = (err, req, res, next) => {
   } else if (err && err.type === 'entity.too.large') {
     statusCode = 413;
     message = 'Request body is too large';
-  } else if (err && (err.name === 'CastError' || err.name === 'ValidationError' || err.name === 'StrictModeError')) {
+  } else if (err && (err.name === 'CastError' || err.name === 'ValidationError' || err.name === 'StrictModeError' || err.name === 'DocumentNotFoundError')) {
     // A value of the wrong type/shape reached Mongoose. Never echo its internal message back.
     statusCode = 400;
     message = 'Invalid request';

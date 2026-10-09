@@ -272,8 +272,8 @@ class NotificationService {
       if (!notification.customerId || notification.customerId.toString() !== customerId.toString()) {
         throw new AppError('Notification not found', 404);
       }
-      notification.isRead = true;
-      await notification.save();
+      // Use updateOne to avoid DocumentNotFoundError on concurrent reads/deletes
+      await Notification.updateOne({ _id: notification._id }, { $set: { isRead: true } });
     }
     const n = notification.toJSON();
     if (n.target === 'all') n.isRead = true;
