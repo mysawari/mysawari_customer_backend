@@ -179,6 +179,11 @@ class NotificationService {
       if ((!device.customerId && customerId) || (device.customerId && customerId && device.customerId.toString() !== customerId.toString())) {
         device.customerId = customerId;
         needsSave = true;
+      } else if (!customerId && device.customerId) {
+        // The phone re-registered without a login (logged out, or the session expired): it must stop
+        // receiving the previous customer's booking pushes.
+        device.customerId = undefined;
+        needsSave = true;
       }
       if (guestSessionId && device.guestSessionId !== guestSessionId) {
         device.guestSessionId = guestSessionId;

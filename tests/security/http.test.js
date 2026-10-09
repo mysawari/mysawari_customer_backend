@@ -71,7 +71,7 @@ test('a token forged with the old publicly-known secret is rejected', async () =
 
 test('protected routes require a token', async () => {
   for (const [method, path] of [['GET', '/bookings/my-bookings'], ['POST', '/bookings/hold'], ['GET', '/customers/wallet'],
-    ['POST', '/customers/wallet/withdraw'], ['POST', '/payments/create-order'], ['GET', '/notifications'],
+    ['POST', '/customers/wallet/withdraw'], ['POST', '/payments/create-order'], ['DELETE', '/notifications'],
     ['POST', '/leads/track'], ['GET', '/bookings/64b000000000000000000001/track-location']]) {
     const res = await fetch(`${base}${path}`, { method, headers: { 'Content-Type': 'application/json' }, body: method === 'POST' ? '{}' : undefined });
     assert.strictEqual(res.status, 401, `${method} ${path}`);

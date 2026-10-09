@@ -44,3 +44,6 @@ build/
 .idea/
 .vscode/
 *.swp
+
+# ── Firebase Admin service-account key (full access to the Firebase project) ──
+firebase-key.json

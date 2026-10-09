@@ -180,3 +180,15 @@ test('public vehicle list does not publish registration numbers', () => {
   const fields = src.match(/'vehicleName[^']*'/)[0];
   assert.ok(!fields.includes('vehicleNumber'));
 });
+
+test('a phone that re-registers without a login stops receiving the previous customer\'s pushes', async (t) => {
+  const CustomerDevice = require('../../src/models/customer_device.model');
+  const notificationService = require('../../src/modules/notifications/notification.service');
+  let saved = false;
+  const device = { customerId: '64b000000000000000000001', expoPushToken: 'ExponentPushToken[abc]', deviceType: 'android', save: async () => { saved = true; } };
+  stub(t, CustomerDevice, { findOne: async () => device });
+  await notificationService.registerDevice(null, 'ExponentPushToken[abc]', 'android', 'session_abcdef123');
+  assert.strictEqual(device.customerId, undefined);
+  assert.strictEqual(device.guestSessionId, 'session_abcdef123');
+  assert.ok(saved);
+});

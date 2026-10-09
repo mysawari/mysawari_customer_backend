@@ -73,7 +73,8 @@ class NotificationController {
     if (!expoPushToken.startsWith('ExponentPushToken[') && !expoPushToken.startsWith('ExpoPushToken[')) {
       throw new AppError('Invalid Expo Push Token format', 400);
     }
-    const device = await notificationService.registerDevice(customerId, expoPushToken, deviceType, guestSessionId);
+    const safeGuestSessionId = notificationService.isGuestSessionId(guestSessionId) ? guestSessionId : undefined;
+    const device = await notificationService.registerDevice(customerId, expoPushToken, deviceType, safeGuestSessionId);
     return ApiResponse.success(res, device, 'Anonymous device registered');
   });
 

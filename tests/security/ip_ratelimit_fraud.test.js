@@ -190,11 +190,12 @@ test('referral payout: two accounts used on the same phone get no commission', a
     updateOne: async (f, u) => { credited += u.$inc.walletBalance; },
   });
   stub(t, Referral, {
+    countDocuments: async () => 0,
     find: async () => [{ _id: 'ref1', referredMobile: '9123456789', invitedAt: new Date(0) }],
     updateOne: async (f, u) => { if (u.$set.status === 'fraudulent') flagged = true; },
     findOneAndUpdate: async () => ({}),
   });
-  stub(t, Booking, { find: () => ({ sort: () => ({ limit: async () => [{ _id: 'b', payment: { vehicleRent: 5000 } }] }) }) });
+  stub(t, Booking, { find: () => ({ sort: () => ({ limit: async () => [{ _id: 'b', payment: { totalAmount: 5000 } }] }) }) });
   stub(t, Token, {
     find: (q) => ({ select: () => ({ limit: () => ({ lean: async () => [{ deviceInfo: `ua | iid:${IID}` }] }) }) }),
   });

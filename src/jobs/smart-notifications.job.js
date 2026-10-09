@@ -177,7 +177,7 @@ async function sendGuestNotifications() {
       await CustomerActivity.create({ action: 'sent_guest_notif', sessionId, details: { key: msg.key } });
       await notificationService.createNotification({
         target: 'specific', customerId: null, guestSessionId: sessionId, title: msg.title, body: msg.body,
-        payload: { kind: 'guest_engagement', link: msg.link },
+        payload: { kind: 'guest_engagement', link: msg.link, carId: msg.carId }, // carId: tapping opens that car
       });
     } catch (err) {
       console.error('[SmartNotifJob] Guest notification failed:', err.message);
@@ -229,7 +229,7 @@ const sendSmartNotifications = async () => {
         const { title, body, link } = profileMessage || marketingMessage(act);
         await CustomerActivity.create({ action: 'sent_marketing_notif', customerId: customer._id, mobileNumber: customer.mobileNumber });
         await notificationService.createNotification({
-          target: 'specific', customerId: customer._id, title, body, payload: { ...act.details, link }
+          target: 'specific', customerId: customer._id, title, body, payload: { ...act.details, link, ...(profileMessage?.carId ? { carId: profileMessage.carId } : {}) }
         });
       } catch (err) {
         console.error('[SmartNotifJob] Marketing notification failed:', err.message);
