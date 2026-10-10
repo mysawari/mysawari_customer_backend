@@ -86,24 +86,22 @@ class AuthService {
     const otp = crypto.randomInt(1000, 10000).toString();
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
     
-    await Otp.findOneAndUpdate(
-      { mobileNumber },
-      { otp, expiresAt, attempts: 0 },
-      { upsert: true, new: true }
-    );
-    
-    // Fire-and-forget: dispatch the WhatsApp message in the background so the
-    // API responds to the customer instantly instead of waiting 2-5 s for WATI.
-    // The OTP is already persisted above, so even if WATI is slow the user can
-    // verify as soon as the message arrives.
+    // Fire-and-forget background delivery (does not block API response)
     watiService.sendWhatsAppOtp(mobileNumber, otp).catch((error) => {
       console.error(`❌ Background WhatsApp OTP delivery failed for ${mobileNumber}:`, error.message);
     });
 
-    // Log only that a request was queued, never the OTP value itself.
+    const [isExistingUser] = await Promise.all([
+      Customer.exists({ mobileNumber }),
+      Otp.findOneAndUpdate(
+        { mobileNumber },
+        { otp, expiresAt, attempts: 0 },
+        { upsert: true, new: true }
+      )
+    ]);
+    
     console.log(`💬 WhatsApp OTP Request Queued: ${mobileNumber}`);
     
-    const isExistingUser = await Customer.exists({ mobileNumber });
     return { isExistingUser: !!isExistingUser };
   }
 
@@ -111,13 +109,15 @@ class AuthService {
     ipAddress = normalizeIp(ipAddress);
     let isNewAccount = false;
     let referralFlagged = null;
-    // Count the attempt atomically BEFORE comparing. The old read-compare-then-increment let many
-    // parallel guesses all read attempts=0 and bypass the 5-attempt limit on a 4-digit code.
-    const storedData = await Otp.findOneAndUpdate(
-      { mobileNumber, attempts: { $lt: MAX_OTP_ATTEMPTS } },
-      { $inc: { attempts: 1 } },
-      { new: true }
-    );
+    // Check OTP attempts and lookup customer concurrently to reduce login latency
+    const [storedData, existingUser] = await Promise.all([
+      Otp.findOneAndUpdate(
+        { mobileNumber, attempts: { $lt: MAX_OTP_ATTEMPTS } },
+        { $inc: { attempts: 1 } },
+        { new: true }
+      ),
+      Customer.findOne({ mobileNumber })
+    ]);
 
     if (!storedData) {
       const exists = await Otp.exists({ mobileNumber });
@@ -145,7 +145,7 @@ class AuthService {
       throw new AppError('Please request a new OTP first', 400);
     }
 
-    let user = await Customer.findOne({ mobileNumber });
+    let user = existingUser;
     
     if (!user) {
       isNewAccount = true;

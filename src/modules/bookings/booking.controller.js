@@ -120,15 +120,16 @@ class BookingController {
     const bookings = await Booking.find(query).populate('vehicleId', 'vehicleName pricePerDay').sort({ createdAt: -1 }).limit(300).lean();
     
     const bookingIds = bookings.map(b => b._id);
-    const extensions = await ExtendBooking.find({ bookingId: { $in: bookingIds } }).lean();
-    const refunds = await Refund.find({ bookingId: { $in: bookingIds } }).lean();
-
-    // Fetch handovers because the Operations app updates financial figures inside the handover
-    // document rather than on the original Booking document when the car is taken.
-    const handovers = await mongoose.connection.db.collection('handovers').find(
-      { bookingId: { $in: bookingIds }, isDeleted: { $ne: true } },
-      { projection: { bookingId: 1, payment: 1 } }
-    ).toArray();
+    
+    // Run these independent queries in parallel to drastically reduce load time.
+    const [extensions, refunds, handovers] = await Promise.all([
+      ExtendBooking.find({ bookingId: { $in: bookingIds } }).lean(),
+      Refund.find({ bookingId: { $in: bookingIds } }).lean(),
+      mongoose.connection.db.collection('handovers').find(
+        { bookingId: { $in: bookingIds }, isDeleted: { $ne: true } },
+        { projection: { bookingId: 1, payment: 1 } }
+      ).toArray()
+    ]);
 
     const bookingsWithExts = bookings.map(b => {
       const exts = extensions.filter(e => e.bookingId.toString() === b._id.toString());
