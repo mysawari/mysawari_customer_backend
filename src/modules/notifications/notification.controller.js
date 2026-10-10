@@ -57,7 +57,13 @@ class NotificationController {
     if (!expoPushToken.startsWith('ExponentPushToken[') && !expoPushToken.startsWith('ExpoPushToken[')) {
       throw new AppError('Invalid Expo Push Token format', 400);
     }
-    const device = await notificationService.registerDevice(customerId, expoPushToken, deviceType);
+    // A login token that was sent but didn't verify (usually just expired: they last 15 minutes) means a
+    // signed-in customer whose app was closed for a while — not a sign-out. Their phone stays linked, or
+    // their booking pushes would stop reaching it. A phone that sends no login at all is signed out.
+    const sentLogin = /^Bearer\s+\S+/i.test(String(req.headers.authorization || ''));
+    const device = await notificationService.registerDevice(customerId, expoPushToken, deviceType, undefined, {
+      keepCustomerLink: !customerId && sentLogin,
+    });
     return ApiResponse.success(res, device, 'Device registered');
   });
 
@@ -74,7 +80,11 @@ class NotificationController {
       throw new AppError('Invalid Expo Push Token format', 400);
     }
     const safeGuestSessionId = notificationService.isGuestSessionId(guestSessionId) ? guestSessionId : undefined;
-    const device = await notificationService.registerDevice(customerId, expoPushToken, deviceType, safeGuestSessionId);
+    // Anonymous registration only records the guest session; it never unlinks a signed-in customer's phone
+    // (if the app registers anonymously at launch, that used to cut the customer off from their pushes).
+    const device = await notificationService.registerDevice(customerId, expoPushToken, deviceType, safeGuestSessionId, {
+      keepCustomerLink: true,
+    });
     return ApiResponse.success(res, device, 'Anonymous device registered');
   });
 
