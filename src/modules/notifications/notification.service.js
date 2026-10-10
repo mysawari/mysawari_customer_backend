@@ -128,8 +128,12 @@ async function sendDirectPushToDevices(tokens, title, body, data) {
 
   // Expo push API accepts batches of up to 100
   const BATCH = 100;
+  const chunks = [];
   for (let i = 0; i < messages.length; i += BATCH) {
-    const batch = messages.slice(i, i + BATCH);
+    chunks.push(messages.slice(i, i + BATCH));
+  }
+
+  await Promise.all(chunks.map(async (batch) => {
     try {
       const res = await fetch('https://exp.host/--/api/v2/push/send', {
         method: 'POST',
@@ -153,7 +157,7 @@ async function sendDirectPushToDevices(tokens, title, body, data) {
     } catch (err) {
       console.error('[Push][Expo] Direct push failed:', err.message);
     }
-  }
+  }));
 }
 
 class NotificationService {
