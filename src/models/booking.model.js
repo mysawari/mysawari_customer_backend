@@ -85,5 +85,6 @@ const bookingSchema = new mongoose.Schema({
 });
 
 bookingSchema.index({ mobileNumber: 1, status: 1 });
+bookingSchema.index({ mobileNumber: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Booking', bookingSchema);

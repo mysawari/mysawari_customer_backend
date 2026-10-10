@@ -6,6 +6,7 @@ const refundSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Booking",
       required: true,
+      index: true,
     },
     customerId: {
       type: mongoose.Schema.Types.ObjectId,
