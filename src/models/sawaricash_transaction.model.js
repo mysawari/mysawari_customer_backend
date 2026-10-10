@@ -41,4 +41,7 @@ const sawariCashTransactionSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+sawariCashTransactionSchema.index({ customerId: 1, createdAt: -1 });
+sawariCashTransactionSchema.index({ customerId: 1, status: 1, expiresAt: 1 });
+
 module.exports = mongoose.model('SawariCashTransaction', sawariCashTransactionSchema, 'sawaricash_transactions');
