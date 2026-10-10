@@ -37,13 +37,13 @@ class PhotonService {
     if (properties.district && properties.district !== properties.name) parts.push(properties.district);
     if (properties.city) parts.push(properties.city);
     if (properties.state) parts.push(properties.state);
-    
+
     // Fallbacks
     if (parts.length === 0) {
       if (properties.country) parts.push(properties.country);
       else return 'Unknown Location';
     }
-    
+
     return parts.join(', ');
   }
 
@@ -65,7 +65,7 @@ class PhotonService {
 
     const normalizedQuery = query.trim().toLowerCase();
     const cacheKey = `search:${normalizedQuery}:${lat || 'none'}:${lon || 'none'}`;
-    
+
     const cachedResult = this._getCache(cacheKey);
     if (cachedResult) return cachedResult;
 
@@ -73,7 +73,7 @@ class PhotonService {
       const url = new URL(`${this.baseUrl}/api/`);
       url.searchParams.append('q', normalizedQuery);
       url.searchParams.append('limit', '8');
-      
+
       // Location bias if provided
       if (lat && lon) {
         url.searchParams.append('lat', lat.toString());
@@ -91,7 +91,7 @@ class PhotonService {
 
       const data = await response.json();
       const mappedData = this._mapPhotonResponse(data);
-      
+
       this._setCache(cacheKey, mappedData);
       return mappedData;
     } catch (error) {
@@ -123,7 +123,7 @@ class PhotonService {
 
       const data = await response.json();
       const mappedData = this._mapPhotonResponse(data);
-      
+
       if (mappedData.length > 0) {
         this._setCache(cacheKey, mappedData[0]);
         return mappedData[0];

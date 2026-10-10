@@ -55,7 +55,7 @@ class AuthController {
     if (error) throw new AppError('Refresh token is required', 400);
 
     const result = await this.service.refreshToken(value.refreshToken, deviceInfoFor(req));
-    
+
     return ApiResponse.success(res, result, 'Token refreshed successfully');
   });
 

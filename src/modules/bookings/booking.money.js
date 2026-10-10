@@ -11,11 +11,10 @@ const DRIVER_RATE_PER_DAY = 1400;
 const SAWARI_CASH_RATE = 0.10;
 const SAWARI_CASH_CAP = 50;
 const MAX_SERVICE_CHARGE = 50000;
-const PER_TRIP_MEMBERSHIP_CAP = 999;
 const MEMBERSHIP_PLANS = {
-  starter: { discountRate: 0.05, annualCap: 10000 },
-  plus: { discountRate: 0.10, annualCap: 15000 },
-  pro: { discountRate: 0.125, annualCap: 20000 },
+  starter: { discountRate: 0.05, tripCap: 499, annualCap: 10000 },
+  plus: { discountRate: 0.10, tripCap: 799, annualCap: 15000 },
+  pro: { discountRate: 0.125, tripCap: 999, annualCap: 20000 },
 };
 const TIME_RE = /^(0?[1-9]|1[0-2]):[0-5]\d\s?(AM|PM)$/i;
 
@@ -75,7 +74,7 @@ function membershipDiscountFor(base, membership) {
   const active = plan && membership.expiresAt && new Date(membership.expiresAt) > new Date();
   if (!active) return 0;
   const remaining = Math.max(0, plan.annualCap - (membership.totalSaved || 0));
-  return Math.min(Math.round(base * plan.discountRate), PER_TRIP_MEMBERSHIP_CAP, remaining);
+  return Math.min(Math.round(base * plan.discountRate), plan.tripCap, remaining);
 }
 
 /**
@@ -111,7 +110,7 @@ function resolveAmounts({ body, pricePerDay, days, discount, membership }) {
   const clientBalance = hasClientBalance ? money(payment.balanceAmount, 'balance amount', 10000000) : null;
 
   for (const driverCharge of [0, DRIVER_RATE_PER_DAY * days]) {
-    const base = Math.max(0, expectedTotal + driverCharge - discount);
+    const base = Math.max(0, expectedTotal + driverCharge + pickupCharge + dropCharge - discount);
     const subscriptionDiscount = membershipDiscountFor(base, membership);
     if (subscriptionDiscount !== clientSubscription) continue;
     const balanceAmount = Math.max(0, base + pickupCharge + dropCharge - subscriptionDiscount - paidOnline - sawariCashUsed);

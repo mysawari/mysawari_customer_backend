@@ -286,7 +286,7 @@ class NotificationService {
    * Clear all notifications for a customer
    */
   async clearAllNotifications(customerId, guestSessionId = null) {
-    if (!customerId && !this.isGuestSessionId(guestSessionId)) return { success: true };
+    if (!customerId && !isGuestSessionId(guestSessionId)) return { success: true };
 
     if (customerId) {
       // Delete all specific notifications for this logged-in customer
